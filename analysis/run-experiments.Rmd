@@ -1,0 +1,187 @@
+---
+title: "run-experiments"
+author: "aniekmarkus"
+date: "2022-05-02"
+output: workflowr::wflow_html
+editor_options:
+  chunk_output_type: console
+---
+
+## Setup instructions
+
+Install the R packages used for the analyses:
+
+```{r install-pkgs, eval=FALSE, echo=TRUE}
+install.packages(c("data.table","ggplot2","randomForest","RWeka"))
+```
+
+Once you have completed these steps, you may run the R code. When
+running the code, make sure your working directory is set to the
+"analysis" directory, e.g.,
+
+```{r working-dir}
+getwd()
+```
+
+## View settings
+
+Settings to check/run:
+```{r}
+library(data.table)
+library(Explore)
+library(ggplot2)
+library(plotly)
+library(gapminder)
+
+options <- expand.grid(StartRulelength = c(1),
+                       EndRulelength = c(3, 4, 5),
+                       Parallel = c("yes", "no"),
+                       Sorted = c(TRUE, FALSE),
+                       Constraint_Accuracy = c(0.8, "custom"),
+                       stringsAsFactors = FALSE) # TODO: check what happens if no solution
+output_path <- paste0(getwd(), "/output/benchmark/timings_", Sys.Date())
+
+if (!dir.exists(output_path)) {
+  dir.create(output_path)
+}
+```
+
+Data included in analysis:
+```{r}
+# Data to include
+# data_name_list <- list.files(path = file.path(getwd(), "data"))
+# data_name_list <- c("iris.arff", "vote.arff", "balance-scale.arff", "cover.arff", "asthmastepup.arff", "outpatientmortality.arff")
+data_name_list <- c("outpatientmortality.arff", "asthmastepup.arff", "cover.arff")
+```
+
+
+## Run code
+```{r eval=TRUE}
+source("code/transform-data.R")
+source("code/experiments.R")
+source("code/compare-methods.R")
+source("code/helper.R")
+
+# output <- runExperiments(data_name_list, options, output_path, compare_settings = TRUE, compare_methods = FALSE)
+output <- runExperiments(data_name_list, options, output_path, compare_settings = FALSE, compare_methods = TRUE)
+```
+
+
+## Plots
+Load results:
+```{r eval=FALSE}
+output_files <- list.files(path = file.path(getwd(), "output", "benchmark", "timings"))
+output_files <- output_files[!(output_files %in% c("explore", "backup"))]
+
+results <- data.frame()
+for (o in output_files) { # o <- output_files[1]
+  
+  import <- read.csv(file.path(output_path, o))
+  results <- rbind(results, import)
+}
+
+```
+
+Plot visualizing computation time:
+```{r }
+data <- results
+data$Model <- NULL # might be different models for same performance
+data$Parallel <- paste0("Parallelization_", data$Parallel)
+data$Sorted <- paste0("Sorted_", data$Sorted)
+data$Constraint_Accuracy <- paste0("Constraint_Accuracy_", data$Constraint_Accuracy)
+
+max_value <- max(data$Time)*1.2
+
+p <- ggplot(data, aes(EndRulelength, Time, color = Data)) +
+  geom_point(aes(shape = Parallel)) +
+  theme_bw() +
+  scale_y_log10(labels = scales::comma) + ylab("Time (in minutes)")
+
+ggplotly(p)
+
+```
+
+Plot visualizing effect of sorting features based on importance LASSO logistic regression on computation time:
+```{r eval=FALSE}
+data <- results
+data$Model <- NULL # might be different models for same performance
+data <- data[data$Parallel == "yes",]
+data$Sorted <- paste0("Sorted_", data$Sorted)
+max_value <- max(data$Time)*1.2
+data <- reshape2::dcast(data,  ... ~ Sorted, value.var = "Time", fun.aggregate = mean)
+
+p <- ggplot(data, aes(Sorted_FALSE, Sorted_TRUE, size = Performance_Accuracy, color=EndRulelength, shape = Data)) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, linetype = "dashed") +
+  geom_point() +
+  theme_bw() +
+  xlim(0, max(max_value)) +
+  ylim(0, max(max_value)) 
+
+ggplotly(p)
+
+data$Sorted_improvement <- (data$Sorted_TRUE - data$Sorted_FALSE) * 100.0 / data$Sorted_FALSE
+
+p <- ggplot(data, aes(EndRulelength, Sorted_improvement, size = Performance_Accuracy, color=Data, shape = Data)) +
+    geom_abline(intercept = 0, slope = 0) +
+  geom_point() +
+  theme_bw()
+
+ggplotly(p)
+
+```
+
+
+Plot visualizing effect of adding accuracy constraint on computation time:
+```{r eval=FALSE}
+data <- results
+data$Model <- NULL # might be different models for same performance
+data <- data[data$Parallel == "yes",]
+data$Constraint_Accuracy <- paste0("Constraint_Accuracy_", data$Constraint_Accuracy)
+max_value <- max(data$Time)*1.2
+data <- reshape2::dcast(data,  ... ~ Constraint_Accuracy, value.var = "Time", fun.aggregate = mean)
+
+p <- ggplot(data, aes(Constraint_Accuracy_NA, Constraint_Accuracy_0.8, size = Performance_Accuracy, color=EndRulelength, shape = Data)) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, linetype = "dashed") +
+  geom_point() +
+  theme_bw() +
+  xlim(0, max(max_value)) +
+  ylim(0, max(max_value)) 
+
+ggplotly(p)
+
+data$Accuracy_improvement <- (data$Constraint_Accuracy_0.8 - data$Constraint_Accuracy_NA) * 100.0 / data$Constraint_Accuracy_NA
+
+p <- ggplot(data, aes(EndRulelength, Accuracy_improvement, size = Performance_Accuracy, color=Data, shape = Data)) +
+    geom_abline(intercept = 0, slope = 0) +
+  geom_point() +
+  theme_bw()
+
+ggplotly(p)
+```
+
+Plot visualizing effect of parallelization on computation time:
+```{r eval=FALSE}
+data <- results
+data$Model <- NULL # might be different models for same performance
+data$Parallel <- paste0("Parallelization_", data$Parallel)
+max_value <- max(data$Time)*1.2
+data <- reshape2::dcast(data,  ... ~ Parallel, value.var = "Time", fun.aggregate = mean)
+
+p <- ggplot(data, aes(Parallelization_no, Parallelization_yes, size = Performance_Accuracy, color=EndRulelength, shape = Data)) +
+  geom_abline(intercept = 0, slope = 1, size = 0.5, linetype = "dashed") +
+  geom_point() +
+  theme_bw() +
+  xlim(0, max(max_value)) +
+  ylim(0, max(max_value)) 
+
+ggplotly(p)
+
+data$Parallel_improvement <- (data$Parallelization_yes - data$Parallelization_no) * 100.0 / data$Parallelization_no
+
+p <- ggplot(data, aes(EndRulelength, Parallel_improvement, size = Performance_Accuracy, color=Data, shape = Data)) +
+    geom_abline(intercept = 0, slope = 0) +
+  geom_point() +
+  theme_bw()
+
+ggplotly(p)
+```
