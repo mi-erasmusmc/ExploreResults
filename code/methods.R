@@ -1,0 +1,247 @@
+
+splitTrainTest <- function(data, d, output_path, frac = NULL, index = NULL) {
+  if (is.null(index)) {
+    # TODO: add warning if frac NULL
+    index = sample(1:nrow(data), frac*nrow(data))
+  }
+
+  train = data[index,] # Create the training data
+  test = data[-index,] # Create the test data
+
+  # if (file.exists(paste0(output_path, "explore/", d, "_train.arff"))) {file.remove(paste0(output_path, "explore/", d, "_train.arff"))}
+  # if (file.exists(paste0(output_path, "explore/", d, "_test.arff"))) {file.remove(paste0(output_path, "explore/", d, "_test.arff"))}
+
+  # Remove columns with no variation in feature from train set (remove from train and test)
+  # TODO: remove columns with little variation (less than 5/10?)
+  if (min(sapply(train, function(c) length(unique(c)))) == 1) {
+    ParallelLogger::logInfo(paste0("Train set ", d, " had ", sum((sapply(train, function(c) length(unique(c))) == 1)), " features with no variation (1 unique value) that are removed"))
+
+    test <- test[,!(sapply(train, function(c) length(unique(c))) == 1)]
+    train <- train[,!(sapply(train, function(c) length(unique(c))) == 1)]
+  }
+
+  # Write to file
+  # farff::writeARFF(train, paste0(output_path, "explore/", d, "_train.arff"))
+  # farff::writeARFF(test, paste0(output_path, "explore/", d, "_test.arff"))
+
+  return(list(train,test))
+}
+
+createModel <- function(method, train = NULL, data_path = NULL, test, data_name, output_path, models, i, explore_options, bound, ...) {
+
+  # Create model predictions
+  if (method == 'lasso') {
+    result <- run_lasso(method, train, test, data_name, output_path, models, i)
+
+  } else if (method == 'randomforest') {
+    result <- run_randomforest(method, train, test, data_name, output_path, models, i)
+
+  } else if (method == 'ripper') {
+    result <- run_ripper(method, train, test, data_name, output_path, models, i)
+
+  } else if (method == 'explore') {
+    # Preparations for settings
+    model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(2, -3, by = -.1), standardize = FALSE, nfolds = 5, family = "binomial")
+    coef <- as.matrix(coef(model_lasso, s = "lambda.min")) # get importance
+    coef <- rownames(coef)[order(-abs(coef))] # order from high to low
+    coef <- coef[-which(coef == "(Intercept)")] # remove intercept
+    train_sorted <- train[,c(coef,"class")] # sort data features by LASSO importance
+
+    if (is.null(bound)) {
+      pred_lasso <- predict(model_lasso, newx = data.matrix(data[, -which(names(data) == "class")]), type="class", s = "lambda.min")
+      eval <- evaluateModel(as.numeric(pred_lasso), data$class)
+      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- eval$accuracy*0.9
+    } else {
+      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- bound*0.9
+    }
+
+    if (is.null(explore_options)) {
+
+      result <- run_EXPLORE(method, data_path, train_sorted, test, data_name, output_path, models, i, o = 0, start_rule_length = 1, end_rule_length = 4, constraint_accuracy = bound, parallel = "yes", sorted = "yes")
+
+      #  result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, specificity = 0.9)
+
+      #   feature_include <- names(which.max(abs(models[method=="lasso" & iteration == i,4:(ncol(models)-1)])))
+      #   result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, feature_include = feature_include)
+
+    } else {
+      pred_explore <- list()
+      model <- setNames(data.table(matrix(0, nrow = 0, ncol = ncol(models))), colnames(models))
+      explore_output <- data.frame()
+
+      # Run EXPLORE with all settings
+      for (o in 1:nrow(explore_options)) { # o <- 1
+        if (explore_options$Sorted[o]) {
+          train_input <- train_sorted
+        } else {
+          train_input <- train
+        }
+
+        result_o <-run_EXPLORE(method, data_path, train_input, test, data_name, output_path, models, i, o,
+                               start_rule_length = explore_options$StartRulelength[o], end_rule_length = explore_options$EndRulelength[o],
+                               constraint_accuracy = explore_options$Constraint_Accuracy[o], parallel = explore_options$Parallel[o], sorted = explore_options$Sorted[o])
+
+        pred_explore <- append(pred_explore, list(result_o[[1]])) # TODO: figure this out!!
+        model <- rbind(model, result_o[[2]])
+        explore_output <- rbind(explore_output, result_o[[3]])
+      }
+
+      result <- list(pred_explore, model, explore_output)
+    }
+  }
+
+  return(result)
+}
+
+
+# https://www.pluralsight.com/guides/linear-lasso-and-ridge-regression-with-r
+#' @export
+run_lasso <- function(method, train, test, data_name, output_path, models, i) {
+
+  # Lambdas to try
+  lambdas <- 10^seq(2, -3, by = -.1)
+
+  # Normalize data
+  colMean <- apply(train[,-which(names(train) == "class")], 2, mean)
+  colSD <- apply(train[,-which(names(train) == "class")], 2, sd)
+
+  train[,-which(names(train) == "class")] <- scale_data(train[,-which(names(train) == "class")], colMean, colSD)
+  test[,-which(names(test) == "class")] <- scale_data(test[,-which(names(test) == "class")], colMean, colSD)
+
+  # Setting alpha = 1 implements lasso regression
+  model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = lambdas, standardize = FALSE, nfolds = 5, family = "binomial")
+  # plot(model_lasso)
+
+  # Save coefficients
+  coef <- as.matrix(coef(model_lasso, s = "lambda.min"))
+  var_names <- colnames(models)[3:(ncol(models)-1)]
+  var_names[1] <- "(Intercept)"
+  vars <- lapply(var_names, function(c) ifelse(c %in% rownames(coef), coef[row.names(coef) == c,1], NA))
+  model <- c(list(method, i), as.list(vars), sum(sapply(vars, function(v) ifelse(v != 0, 1, 0))) - 1) # do not count intercept in model size
+
+  coef <- coef[coef != 0,]
+  ParallelLogger::logInfo(paste0(method, ": ", paste(names(coef), coef, sep = ":", collapse = ",")))
+
+  pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="class", s = "lambda.min")
+
+  # Create accuracy bound from performance
+  pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
+  eval <- evaluateModel(as.numeric(pred), train$class)
+  bound <- eval$accuracy*0.9
+
+  # Transform character to numeric
+  pred_lasso <- as.numeric(pred_lasso)
+
+  return(list(list(pred_lasso), model, bound))
+}
+
+
+#' @export
+run_randomforest<- function(method, train, test, data_name, output_path, models, i) {
+
+  model_randomforest <- randomForest::randomForest(factor(class) ~ ., data = train)
+
+  # Save variables
+  count_vars <- randomForest::varUsed(model_randomforest, by.tree = FALSE, count = TRUE)
+  names(count_vars) <- colnames(train)[1:(ncol(train)-1)]
+
+  vars <- lapply(colnames(models)[3:(ncol(models)-1)], function(c) ifelse(c %in% names(count_vars), count_vars[c], NA))
+  model <- c(list(method, i), as.list(vars), sum(sapply(vars, function(v) ifelse(v > 0, 1, 0)), na.rm = TRUE))
+
+  ParallelLogger::logInfo(paste0(method,": ", paste(paste0(names(count_vars), " ", count_vars), collapse = ",")))
+
+  pred_randomforest <- predict(model_randomforest, test, type = "response")
+
+  # Transform character to numeric
+  pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
+
+  return(list(list(pred_randomforest), model))
+}
+
+
+#' @export
+run_ripper <- function(method, train, test, data_name, output_path, models, i) {
+
+  train <- as.data.frame(lapply(train,factor),  stringsAsFactors=FALSE)
+  model_ripper <- RWeka::JRip(class ~ . , train)
+  # print(model_ripper)
+
+  # Save variables
+  model_string <- model_ripper$classifier$toString()
+  vars <- lapply(colnames(models)[3:(ncol(models)-1)], function(c) ifelse(stringr::str_detect(model_string, c), 1, 0))
+  model <- c(list(method, i), as.list(vars), do.call(sum, vars))
+
+  ParallelLogger::logInfo(paste0(method,": ", model_string))
+
+  test <- as.data.frame(lapply(test,factor),  stringsAsFactors=FALSE)
+  pred_ripper <- predict(model_ripper,test, type="class") # alternative: probability
+
+  # Transform factor to numeric
+  pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
+
+  return(list(list(pred_ripper), model))
+}
+
+
+#' @export
+run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, models, i, o, feature_include = NULL, specificity = NULL, start_rule_length = 1, end_rule_length = 3, constraint_accuracy = 0.8, parallel = "yes", sorted = "yes") {
+
+  # Insert mandatory included features
+  if (!is.null(feature_include)) {
+    feature_include <- paste0("'", feature_include, "'")
+  }
+
+  time_start <- Sys.time()
+
+  # Option 2: pre-specified settings file with input data
+  # TODO: test with R.Utils::withTimeout
+  rule_string <- Explore::trainExplore(output_path = file.path(output_path, "explore/"), file_name = paste0(data_name, "_train_", o, "_", i),
+                                       train_data = train, ClassFeature = "'class'", PositiveClass = 1, FeatureInclude = feature_include, Specificity = specificity,
+                                       StartRulelength = start_rule_length, EndRulelength = end_rule_length, Accuracy = constraint_accuracy, Parallel = parallel)
+  time_end <- Sys.time()
+
+  # Save variables
+  vars <- stringr::str_match_all(rule_string, "'\\s*(.*?)\\s*'")[[1]]
+  vars <- lapply(colnames(models)[3:(ncol(models)-1)], function(c) ifelse(c %in% vars[,2], 1, 0))
+  model <- c(list(method, i), vars, do.call(sum, vars))
+  # TODO: add threshold instead
+
+  ParallelLogger::logInfo(paste0(method,": ", rule_string))
+
+  # Make predictions using EXPLORE
+  pred_explore <- Explore::predictExplore(model = rule_string, test_data = test) # TEST!
+
+  # EXPLORE output
+  if (!(rule_string == "") && !is.null(rule_string)) { # TODO: differentiate between no model with constraints ("") or maximum time exceeded (NULL)
+    # TODO: can model be NA?
+
+    explore_model <- rule_string
+    time_explore <- difftime(time_end, time_start, units = "mins")
+
+    pred_explore_train <- Explore::predictExplore(model = rule_string, test_data = train) # TRAIN!
+    eval <- evaluateModel(pred_explore_train, train$class)
+    accuracy <- eval[[ "accuracy"]]
+
+  } else if (rule_string == "") {
+    explore_model <- "model not available"
+    accuracy <- NA
+    time_explore <- NA
+  } else if (is.null(rule_string)) {
+    explore_model <- "time exceeded"
+    accuracy <- NA
+    time_explore <- NA
+  }
+
+  explore_output_d_o_i <- list(StartRulelength = start_rule_length,
+                               EndRulelength = end_rule_length,
+                               Parallel = parallel,
+                               Sorted = sorted,
+                               Constraint_Accuracy = constraint_accuracy,
+                               Time = time_explore,
+                               Model = explore_model,
+                               Performance_Accuracy = accuracy,
+                               Data = data_name)
+
+  return(list(pred_explore, model, explore_output_d_o_i))
+}
+
