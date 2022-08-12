@@ -48,16 +48,16 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
     train_sorted <- train[,c(coef,"class")] # sort data features by LASSO importance
 
     if (is.null(bound)) {
-      pred_lasso <- predict(model_lasso, newx = data.matrix(data[, -which(names(data) == "class")]), type="class", s = "lambda.min")
-      eval <- evaluateModel(as.numeric(pred_lasso), data$class)
-      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- eval$accuracy*0.9
+      pred_lasso <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
+      eval <- evaluateModel(as.numeric(pred_lasso), train$class)
+      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- eval$accuracy*0.7
     } else {
-      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- bound*0.9
+      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- bound*0.7
     }
 
     if (is.null(explore_options)) {
 
-      result <- run_EXPLORE(method, data_path, train_sorted, test, data_name, output_path, models, i, o = 0, start_rule_length = 1, end_rule_length = 4, constraint_accuracy = bound, parallel = "yes", sorted = "yes")
+      result <- run_EXPLORE(method, data_path, train_sorted, test, data_name, output_path, models, i, o = 0, start_rule_length = 1, end_rule_length = 4, constraint_accuracy = bound, parallel = "yes", maximize = "ACCURACY", sorted = "yes")
 
       #  result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, specificity = 0.9)
 
@@ -79,7 +79,8 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
 
         result_o <-run_EXPLORE(method, data_path, train_input, test, data_name, output_path, models, i, o,
                                start_rule_length = explore_options$StartRulelength[o], end_rule_length = explore_options$EndRulelength[o],
-                               constraint_accuracy = explore_options$Constraint_Accuracy[o], parallel = explore_options$Parallel[o], sorted = explore_options$Sorted[o])
+                               constraint_accuracy = explore_options$Constraint_Accuracy[o], parallel = explore_options$Parallel[o],
+                               maximize = explore_options$Maximize[o], sorted = explore_options$Sorted[o])
 
         pred_explore <- append(pred_explore, list(result_o[[1]])) # TODO: figure this out!!
         model <- rbind(model, result_o[[2]])
@@ -127,7 +128,7 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   # Create accuracy bound from performance
   pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
   eval <- evaluateModel(as.numeric(pred), train$class)
-  bound <- eval$accuracy*0.9
+  bound <- eval$accuracy*0.7
 
   # Transform character to numeric
   pred_lasso <- as.numeric(pred_lasso)
@@ -184,7 +185,7 @@ run_ripper <- function(method, train, test, data_name, output_path, models, i) {
 
 
 #' @export
-run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, models, i, o, feature_include = NULL, specificity = NULL, start_rule_length = 1, end_rule_length = 3, constraint_accuracy = 0.8, parallel = "yes", sorted = "yes") {
+run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, models, i, o, feature_include = NULL, specificity = NULL, start_rule_length = 1, end_rule_length = 3, constraint_accuracy = 0.8, parallel = "yes", maximize = "ACCURACY", sorted = "yes") {
 
   # Insert mandatory included features
   if (!is.null(feature_include)) {
@@ -197,7 +198,8 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   # TODO: test with R.Utils::withTimeout
   rule_string <- Explore::trainExplore(output_path = file.path(output_path, "explore/"), file_name = paste0(data_name, "_train_", o, "_", i),
                                        train_data = train, ClassFeature = "'class'", PositiveClass = 1, FeatureInclude = feature_include, Specificity = specificity,
-                                       StartRulelength = start_rule_length, EndRulelength = end_rule_length, Accuracy = constraint_accuracy, Parallel = parallel)
+                                       StartRulelength = start_rule_length, EndRulelength = end_rule_length, Accuracy = constraint_accuracy, Parallel = parallel,
+                                       Maximize = maximize)
   time_end <- Sys.time()
 
   # Save variables

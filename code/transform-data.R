@@ -28,9 +28,16 @@ runCheckData <- function(data, d) {
 }
 
 
-summarizeData <- function(summary_data, data) {
+summarizeData <- function(summary_data, data, d) {
+
+  # Number of outcomes
+  outcomes <- sum(data$class)
+
+  # Number of observations
+  observations <-  nrow(data)
+
   # Outcome rate
-  rate <- sum(data$class) * 100.0 / nrow(data)
+  rate <- outcomes * 100.0 / observations
 
   # Number of features
   num_features <- ncol(data) - 1
@@ -43,12 +50,17 @@ summarizeData <- function(summary_data, data) {
   min_val <- min(data)
   max_val <- max(data)
 
-  summary_data <- rbind(summary_data, c(list("Outcome_rate" = rate,
+  summary_data <- rbind(summary_data, c(list("Data" = d,
+                                             "Outcomes" = outcomes,
+                                             "Observations" = observations,
+                                             "Outcome_rate" = rate,
                                              "Number_of_features" = num_features),
-                                              "Max_different_values" = max_val_features,
-                                              "Min_different_values" = min_val_features,
-                                              "Min_val" = min_val,
-                                              "Max_val" =  max_val))
+                                        "Max_different_values" = max_val_features,
+                                        "Min_different_values" = min_val_features,
+                                        "Min_val" = min_val,
+                                        "Max_val" =  max_val,
+                                        "Outcomes_resampling" = NA,
+                                        "Outcome_rate_resampling" = NA))
   return(summary_data)
 }
 

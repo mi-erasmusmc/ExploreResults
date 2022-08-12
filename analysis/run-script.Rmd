@@ -1,0 +1,148 @@
+---
+ title: "run-script"
+ author: "aniek markus"
+ date: '2022-08-02'
+ output: pdf_document
+ ---
+ 
+## Setup
+```{r setup, include=FALSE}
+ knitr::opts_chunk$set(
+comment = "#>", echo = FALSE, fig.width = 5,
+warning=FALSE, message=FALSE,
+eval = TRUE
+)
+
+# install.packages(c("data.table","ggplot2","randomForest","RWeka"))
+
+library(workflowr)
+library(data.table)
+library(Explore)
+library(ggplot2)
+library(plotly)
+library(gapminder)
+
+# folder <- "/Users/aniekmarkus/Documents/Git/ExploreResults/output/timings_2022-07-26"
+# folder <- "/home/amarkus/Documents/ExploreResults/output/timings_2022-07-26"
+
+print("Setup check")
+```
+
+
+## Data
+```{r data, eval=FALSE}
+source("code/preparation-data.R")
+
+# TODO: add pre-variable selection
+# TODO: add transform data here?
+
+print("Data check")
+```
+
+
+## Experiments
+```{r experiment-settings}
+explore_options <- expand.grid(StartRulelength = c(1),
+                               EndRulelength = c(3),
+                               Parallel = c("yes"),
+                               Sorted = c(FALSE),
+                               Constraint_Accuracy = c("custom"),
+                               Maximize = c("ACCURACY", "BALANCEDACCURACY"),
+                               stringsAsFactors = FALSE) # TODO: check what happens if no solution
+# explore_options <- data.frame()
+
+output_path <- paste0(getwd(), "/output/timings_", Sys.Date())
+if (!dir.exists(output_path)) {
+  dir.create(output_path)
+}
+
+# Data to include
+# data_name_list <- list.files(path = file.path(".", "data", "IPCI"))
+
+# data_name_list <- data_name_list[!(data_name_list %in% c("all", "AsthmaStepUp_v1", "COVER_v1", "OutpatientMortality_v1"))]
+# data_name_list <- c("iris.arff", "vote.arff", paste0("IPCI/", data_name_list))
+
+data_name_list <- c("outpatientmortality.arff", "iris.arff", "vote.arff", "balance-scale.arff", "cover.arff", "asthmastepup.arff")
+
+#data_name_list <- c("iris.arff", "vote.arff", "balance-scale.arff", "IPCI/cover_var_50obs_1e+09.arff", "IPCI/outpatientmortality_var_50obs_1e+09.arff", "IPCI/asthmastepup_var_50obs_1e+09.arff")
+
+# Methods to test
+methods_list <- c("lasso", "explore")
+# methods_list <- c("lasso", "randomforest", "ripper", "explore")
+
+print("Experiment-settings check")
+```
+
+
+```{r experiment-run}
+source("code/transform-data.R")
+source("code/oversampling-data.R")
+source("code/methods.R")
+source("code/experiments.R")
+source("code/helper.R")
+
+# parallel::mcaffinity(affinity = 1:30)
+output <- runExperiments(output_path, data_name_list, methods_list, explore_options,
+                         train_fraction = 0.7, num_iterations = 1,
+                         sampling_strategy = 0.1, sample_size = "same")
+
+print("Experiment-run check")
+```
+
+
+## Output
+
+## Settings
+<!-- TODO: create subheaders -->
+
+```{r output-settings}
+source("code/output.R")
+
+# TODO: if output_path does not exist -> use folder
+# output_path <- folder
+
+explore_options <- read.csv(file.path(output_path, "explore_options.csv"))
+knitr::kable(explore_options)
+
+summary_data <- read.csv(file.path(output_path, "summary_data.csv"))
+knitr::kable(summary_data)
+
+# TODO: add logs per data on pre-variable selection type etc.
+
+print("Output-settings check")
+```
+
+## Running time EXPLORE
+```{r output-time}
+explore_output <- read.csv(file.path(output_path, "explore_output.csv"))
+
+## Clean data
+# TODO: remove below 3 lines after testing
+# explore_output$Dataset <- stringr::str_split(explore_output$Data, "_", simplify = TRUE)[,1]
+# explore_output$Var <- as.numeric(gsub("obs", "", stringr::str_split(explore_output$Data, "_", simplify = TRUE)[,3])) # var
+# explore_output$Obs <- as.numeric(stringr::str_split(explore_output$Data, "_", simplify = TRUE)[,4]) # obs
+
+explore_output <- merge(explore_output, summary_data, by = intersect(names(explore_output), names(summary_data)))
+explore_output$Data <- stringr::str_split(explore_output$Data, "_", simplify = TRUE)[,1]
+
+## Write data
+# knitr::kable(explore_output)
+
+outputTime(explore_output) 
+
+print("Output-time check")
+```
+
+## Performance
+```{r output-performance}
+output_methods <- read.csv(file.path(output_path, "output_methods.csv"))
+
+## Write data
+# knitr::kable(output_methods)
+
+outputPerformance(output_methods) 
+
+print("Output-performance check")
+```
+
+

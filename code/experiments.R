@@ -1,30 +1,44 @@
-runExperiments <- function(output_path, data_name_list, methods_list, explore_options, train_fraction = 0.7, num_iterations = 1) {
+runExperiments <- function(output_path, data_name_list, methods_list, explore_options, train_fraction = 0.7, num_iterations = 1, sampling_strategy = NULL, sample_size = "same") {
 
   summary_data <- data.frame()
   methods_output <- data.frame()
   explore_output <- data.frame()
 
+  write.csv(explore_options, file.path(output_path, "explore_options.csv"), row.names = FALSE)
+
   explore_options$Time <- NA
   explore_options$Model <- NA
   explore_options$Performance_Accuracy <- NA
 
-  for (d in data_name_list) { # d <- data_name_list[1]
+  for (d in data_name_list) { # d <- data_name_list[2]
     ParallelLogger::logInfo(print(paste0("Checking computation times for ", d, " data")))
 
     ## LOAD DATA
     data <- farff::readARFF(file.path(getwd(), "data", d))
-    d <- gsub(pattern = ".arff", replacement = "", d, fixed = TRUE)
 
-    colnames(data)[1:(ncol(data)-1)] <- paste0("var_", colnames(data)[1:(ncol(data)-1)]) # add var to colnames (numbers don't work)
+    if (grepl(pattern = "IPCI/", d)) {
+      # colnames(data)[1:(ncol(data)-1)] <- paste0("var_", colnames(data)[1:(ncol(data)-1)]) # add var to colnames (numbers don't work)
+      # colnames(data)[1:(ncol(data)-1)] <- stringr::str_split(colnames(data)[1:(ncol(data)-1)], '\\([0-9]|[0-9]\\)', simplify = TRUE)[,2]
+      colnames(data)[1:(ncol(data)-1)] <- paste0("var_", 1:(ncol(data)-1))
+
+    }
+
+    d <- gsub(pattern = ".arff", replacement = "", d, fixed = TRUE)
+    d <- gsub(pattern = "IPCI/", replacement = "", d, fixed = TRUE)
 
     # Run checks
     data <- runCheckData(data, d)
 
     # Summarize data
-    summary_data <- summarizeData(summary_data, data)
+    summary_data <- summarizeData(summary_data, data, d)
 
     # Create train/test split
     split_data <- splitTrainTest(data, d, output_path, frac = train_fraction)
+
+    # Correct imbalance in both train data (leave test data the same)
+    split_data[[1]] <- oversample(split_data[[1]], summary_data, sampling_strategy, sample_size, d)
+
+    # TODO: count outcomes test data?
 
     bound = NULL;
     models <- setNames(data.table(matrix(0, nrow = 0, ncol = ncol(data)+3)), c("method", "iteration", "intercept", colnames(data)[1:(ncol(data)-1)], "model size"))
@@ -50,7 +64,14 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
 
         for (o in 1:length(result[[1]])) {
           eval <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
-          methods_output <- rbind(methods_output, c(list(Time = difftime(time_end, time_start, units = "mins"), Model = NA, Performance_Accuracy = eval[[ "accuracy"]], Performance_AUC = eval[["auc_roc"]], Performance_AUPRC = eval[["auc_pr"]], Data = d, Method = m, Iteration = i, Option = o)))
+          methods_output <- rbind(methods_output, c(list(Time = difftime(time_end, time_start, units = "mins"), Model = NA,
+                                                         Performance_Accuracy = eval[[ "accuracy"]], Performance_Sensitivity = eval[[ "sensitivity"]],
+                                                         Performance_Specificity = eval[[ "specificity"]], Performance_PPV = eval[[ "PPV"]],
+                                                         Performance_NPV = eval[[ "NPV"]], Performance_AUC = eval[["auc_roc"]],
+                                                         Performance_AUPRC = eval[["auc_pr"]],
+                                                         Performance_BalancedAccuracy = eval[["balanced_accuracy"]],
+                                                         Performance_F1score = eval[["F1_score"]],
+                                                         Data = d, Method = m, Iteration = i, Option = o)))
         }
 
         if (m == "lasso" && i == 1) { # Create accuracy bound from lasso performance
@@ -61,13 +82,18 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
       }
 
       # Save update each time one method is finished
+      # TODO: save files to temp folder? (redundant at the end)
       write.csv(round_dt(models, 3), file.path(output_path, paste0("models_", d, ".csv")), row.names = FALSE)
       write.csv(methods_output, file.path(output_path, paste0("output_methods_", d, ".csv")), row.names = FALSE)
       write.csv(explore_output, file.path(output_path, paste0("explore_output_", d, ".csv")), row.names = FALSE)
+      write.csv(summary_data, file.path(output_path, paste0("summary_data_", d, ".csv")), row.names = FALSE)
     }
   }
 
   # TODO: group by ... and aggregate results over different i
+  write.csv(methods_output, file.path(output_path, paste0("output_methods.csv")), row.names = FALSE)
+  write.csv(explore_output, file.path(output_path, paste0("explore_output.csv")), row.names = FALSE)
+  write.csv(summary_data, file.path(output_path, paste0("summary_data.csv")), row.names = FALSE)
 
   return(list(explore_output, methods_output))
 }
@@ -92,8 +118,10 @@ evaluateModel <- function(predictions, real) {
   specificity <- caret::specificity(conf_matrix)
   PPV <- summary_performance$byClass['Pos Pred Value']
   NPV <- summary_performance$byClass['Neg Pred Value']
+  balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
+  F1_score <- summary_performance$byClass['F1']
 
-  results <- list(auc_roc=roc$auc, auc_pr=pr, accuracy=accuracy, sensitivity=sensitivity, specificity=specificity, PPV=PPV, NPV=NPV)
+  results <- list(auc_roc=roc$auc, auc_pr=pr, accuracy=accuracy, sensitivity=sensitivity, specificity=specificity, PPV=PPV, NPV=NPV, balanced_accuracy=balanced_accuracy, F1_score=F1_score)
 
   return(results)
 }
