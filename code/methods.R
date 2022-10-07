@@ -40,37 +40,43 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
     result <- run_ripper(method, train, test, data_name, output_path, models, i)
 
   } else if (method == 'explore') {
-    # Preparations for settings
-    model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(2, -3, by = -.1), standardize = FALSE, nfolds = 5, family = "binomial")
-    coef <- as.matrix(coef(model_lasso, s = "lambda.min")) # get importance
-    coef <- rownames(coef)[order(-abs(coef))] # order from high to low
-    coef <- coef[-which(coef == "(Intercept)")] # remove intercept
-    train_sorted <- train[,c(coef,"class")] # sort data features by LASSO importance
-
-    if (is.null(bound)) {
-      pred_lasso <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
-      eval <- evaluateModel(as.numeric(pred_lasso), train$class)
-      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- eval$accuracy*0.7
-    } else {
-      explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- bound*0.7
-    }
-
     if (is.null(explore_options)) {
-
-      result <- run_EXPLORE(method, data_path, train_sorted, test, data_name, output_path, models, i, o = 0, start_rule_length = 1, end_rule_length = 4, constraint_accuracy = bound, parallel = "yes", maximize = "ACCURACY", sorted = "yes")
-
-      #  result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, specificity = 0.9)
+      result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, o = 0, start_rule_length = 1, end_rule_length = 4, accuracy = NULL, specificity = NULL, parallel = "yes", maximize = "ACCURACY", sorted = "yes")
 
       #   feature_include <- names(which.max(abs(models[method=="lasso" & iteration == i,4:(ncol(models)-1)])))
       #   result <- run_EXPLORE(method, data_path, train, test, data_name, output_path, models, i, feature_include = feature_include)
 
     } else {
       pred_explore <- list()
-      model <- setNames(data.table(matrix(0, nrow = 0, ncol = ncol(models))), colnames(models))
-      explore_output <- data.frame()
+      model <- list()
+      methods_output <- list()
+      explore_output <- list()
+
+      # Preparations for settings
+      if (any(explore_options$Sorted == TRUE)| any(explore_options$Constraint_Accuracy == "custom")) {
+        # TODO: change here to Cyclops?
+
+        model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(3, -2, by = -.1), maxit=10000000, standardize = TRUE, nfolds = 5, family = "binomial")
+        # model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(2, -3, by = -.1), standardize = FALSE, nfolds = 5, family = "binomial")
+        coef <- as.matrix(coef(model_lasso, s = "lambda.min")) # get importance
+        coef <- rownames(coef)[order(-abs(coef))] # order from high to low
+        coef <- coef[-which(coef == "(Intercept)")] # remove intercept
+        train_sorted <- train[,c(coef,"class")] # sort data features by LASSO importance
+      }
+
+      if (any(explore_options$Constraint_Accuracy == "custom")) {
+        if (is.null(bound)) {
+          pred_lasso <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
+          eval <- evaluateModel(as.numeric(pred_lasso), train$class)
+          explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- eval$accuracy*0.7
+        } else {
+          explore_options$Constraint_Accuracy[explore_options$Constraint_Accuracy == "custom"] <- bound*0.7
+        }
+      }
 
       # Run EXPLORE with all settings
       for (o in 1:nrow(explore_options)) { # o <- 1
+
         if (explore_options$Sorted[o]) {
           train_input <- train_sorted
         } else {
@@ -79,15 +85,17 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
 
         result_o <-run_EXPLORE(method, data_path, train_input, test, data_name, output_path, models, i, o,
                                start_rule_length = explore_options$StartRulelength[o], end_rule_length = explore_options$EndRulelength[o],
-                               constraint_accuracy = explore_options$Constraint_Accuracy[o], parallel = explore_options$Parallel[o],
+                               accuracy = explore_options$Constraint_Accuracy[o], specificity = explore_options$Constraint_Specificity[o],
+                               parallel = explore_options$Parallel[o],
                                maximize = explore_options$Maximize[o], sorted = explore_options$Sorted[o])
 
-        pred_explore <- append(pred_explore, list(result_o[[1]])) # TODO: figure this out!!
-        model <- rbind(model, result_o[[2]])
-        explore_output <- rbind(explore_output, result_o[[3]])
+        pred_explore <- append(pred_explore, result_o[[1]])
+        model <- append(model, result_o[[2]])
+        methods_output <- append(methods_output, result_o[[3]])
+        explore_output <- append(explore_output, result_o[[4]])
       }
 
-      result <- list(pred_explore, model, explore_output)
+      result <- list(pred_explore, model, methods_output, explore_output)
     }
   }
 
@@ -99,9 +107,6 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
 #' @export
 run_lasso <- function(method, train, test, data_name, output_path, models, i) {
 
-  # Lambdas to try
-  lambdas <- 10^seq(2, -3, by = -.1)
-
   # Normalize data
   colMean <- apply(train[,-which(names(train) == "class")], 2, mean)
   colSD <- apply(train[,-which(names(train) == "class")], 2, sd)
@@ -110,7 +115,9 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   test[,-which(names(test) == "class")] <- scale_data(test[,-which(names(test) == "class")], colMean, colSD)
 
   # Setting alpha = 1 implements lasso regression
-  model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = lambdas, standardize = FALSE, nfolds = 5, family = "binomial")
+  # TODO: change here to Cyclops?
+  model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(3, -2, by = -.1), maxit=10000000, standardize = FALSE, nfolds = 5, family = "binomial")
+  # model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(2, -3, by = -.1), standardize = FALSE, nfolds = 5, family = "binomial", maxit=100000000)
   # plot(model_lasso)
 
   # Save coefficients
@@ -123,17 +130,27 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   coef <- coef[coef != 0,]
   ParallelLogger::logInfo(paste0(method, ": ", paste(names(coef), coef, sep = ":", collapse = ",")))
 
-  pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="class", s = "lambda.min")
+  class = TRUE
+  if (class) {
+    pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="class", s="lambda.min")
+  } else {
+    pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="response", s="lambda.min")
+  }
 
   # Create accuracy bound from performance
-  pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
-  eval <- evaluateModel(as.numeric(pred), train$class)
-  bound <- eval$accuracy*0.7
+  if (class) {
+    pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
+  } else {
+    pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="response", s = "lambda.min")
+  }
+
+  eval_train <- evaluateModel(as.numeric(pred), train$class)
+  bound <- eval_train$accuracy
 
   # Transform character to numeric
   pred_lasso <- as.numeric(pred_lasso)
 
-  return(list(list(pred_lasso), model, bound))
+  return(list(list(pred_lasso), list(model), list(eval_train), list(bound)))
 }
 
 
@@ -156,7 +173,9 @@ run_randomforest<- function(method, train, test, data_name, output_path, models,
   # Transform character to numeric
   pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
 
-  return(list(list(pred_randomforest), model))
+  eval_train <- evaluateModel(pred_randomforest, train$class)
+
+  return(list(list(pred_randomforest), list(model), list(eval_train)))
 }
 
 
@@ -180,12 +199,14 @@ run_ripper <- function(method, train, test, data_name, output_path, models, i) {
   # Transform factor to numeric
   pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
 
-  return(list(list(pred_ripper), model))
+  eval_train <- evaluateModel(pred_ripper, train$class)
+
+  return(list(list(pred_ripper), list(model), list(eval_train)))
 }
 
 
 #' @export
-run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, models, i, o, feature_include = NULL, specificity = NULL, start_rule_length = 1, end_rule_length = 3, constraint_accuracy = 0.8, parallel = "yes", maximize = "ACCURACY", sorted = "yes") {
+run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, models, i, o, feature_include = NULL, specificity = NULL, start_rule_length = 1, end_rule_length = 3, accuracy = 0.8, parallel = "yes", maximize = "ACCURACY", sorted = "yes") {
 
   # Insert mandatory included features
   if (!is.null(feature_include)) {
@@ -198,7 +219,7 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   # TODO: test with R.Utils::withTimeout
   rule_string <- Explore::trainExplore(output_path = file.path(output_path, "explore/"), file_name = paste0(data_name, "_train_", o, "_", i),
                                        train_data = train, ClassFeature = "'class'", PositiveClass = 1, FeatureInclude = feature_include, Specificity = specificity,
-                                       StartRulelength = start_rule_length, EndRulelength = end_rule_length, Accuracy = constraint_accuracy, Parallel = parallel,
+                                       StartRulelength = start_rule_length, EndRulelength = end_rule_length, Accuracy = accuracy, Parallel = parallel,
                                        Maximize = maximize)
   time_end <- Sys.time()
 
@@ -214,36 +235,23 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   pred_explore <- Explore::predictExplore(model = rule_string, test_data = test) # TEST!
 
   # EXPLORE output
-  if (!(rule_string == "") && !is.null(rule_string)) { # TODO: differentiate between no model with constraints ("") or maximum time exceeded (NULL)
-    # TODO: can model be NA?
-
+  if (!(rule_string == "") && !is.null(rule_string)) {
     explore_model <- rule_string
     time_explore <- difftime(time_end, time_start, units = "mins")
 
     pred_explore_train <- Explore::predictExplore(model = rule_string, test_data = train) # TRAIN!
-    eval <- evaluateModel(pred_explore_train, train$class)
-    accuracy <- eval[[ "accuracy"]]
-
+    eval_train <- evaluateModel(pred_explore_train, train$class)
   } else if (rule_string == "") {
     explore_model <- "model not available"
-    accuracy <- NA
+    eval_train <- NA
     time_explore <- NA
   } else if (is.null(rule_string)) {
     explore_model <- "time exceeded"
-    accuracy <- NA
+    eval_train <- NA
     time_explore <- NA
   }
 
-  explore_output_d_o_i <- list(StartRulelength = start_rule_length,
-                               EndRulelength = end_rule_length,
-                               Parallel = parallel,
-                               Sorted = sorted,
-                               Constraint_Accuracy = constraint_accuracy,
-                               Time = time_explore,
-                               Model = explore_model,
-                               Performance_Accuracy = accuracy,
-                               Data = data_name)
-
-  return(list(pred_explore, model, explore_output_d_o_i))
+  explore_output_d_o_i <- list(Time = time_explore, Model = explore_model, Data = data_name, Iteration = i, Option = o)
+  return(list(list(pred_explore), list(model), list(eval_train), list(explore_output_d_o_i)))
 }
 

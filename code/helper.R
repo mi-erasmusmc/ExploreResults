@@ -25,3 +25,160 @@ create_bootstrap_samples <- function(file, num_samples = 10, sample_size = 10000
   }
   return(bootstrap_samples)
 }
+
+evaluateModel <- function(predictions, real) {
+
+  if (length(unique(predictions)) == 1) {
+    warning('No variation in predictions!')
+  }
+
+  auc <- pROC::auc(real, predictions, levels = c("0", "1"), direction = "<")
+  partial_auc <- pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<")
+
+  # roc <- PRROC::roc.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)
+
+  pr <- NA
+  try(pr <- PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, silent = TRUE)
+
+  # plot(roc)
+  # plot(pr)
+
+  conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
+  summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
+
+  accuracy <- summary_performance$overall['Accuracy']
+  sensitivity <- summary_performance$byClass['Sensitivity']
+  specificity <- summary_performance$byClass['Specificity']
+  PPV <- summary_performance$byClass['Pos Pred Value']
+  NPV <- summary_performance$byClass['Neg Pred Value']
+  balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
+  F1_score <- summary_performance$byClass['F1']
+
+  results <- list(Perf_AUC= auc, # roc$auc,
+                  Perf_AUPRC=pr,
+                  Perf_PAUC=partial_auc,
+                  Perf_Accuracy=accuracy,
+                  Perf_Sensitivity=sensitivity,
+                  Perf_Specificity=specificity,
+                  Perf_PPV=PPV,
+                  Perf_NPV=NPV,
+                  Perf_BalancedAccuracy=balanced_accuracy,
+                  Perf_F1score=F1_score)
+
+  return(results)
+}
+
+
+
+lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class = "f1_score") {
+  # Lasso logistic regression using glmnet
+  if (is.null(model_lasso)) {
+    model_lasso <- glmnet::cv.glmnet(x=data.matrix(x), y = y, alpha = 1, standardize = TRUE, nfolds = 5, family = "binomial")
+
+  }
+
+  if (return == "model") {
+    return(model_lasso)
+
+  } else if (return == "features") {
+    coef <- as.matrix(coef(model_lasso, s = "lambda.min")) # get importance
+    coef_ordered <- coef[order(abs(coef), decreasing = TRUE)]
+    names_ordered <- rownames(coef)[order(abs(coef), decreasing = TRUE)]
+    names(coef_ordered) <- names_ordered
+
+    coef_ordered <- coef_ordered[names(coef_ordered) != "(Intercept)"]
+    n_sel <- sum(coef_ordered != 0)
+
+    features <- x[,names(coef_ordered[1:n_sel])]
+
+    return(features)
+  } else if (return == "predict_class") {
+    predictions <- predict(model_lasso, newx = data.matrix(x), type="response", s="lambda.min")
+
+    values <- seq(0.01,0.99,0.01)
+    if (optimise_class == "default") {
+      class <- as.numeric(predict(model_lasso, newx = data.matrix(x), type="class", s="lambda.min"))
+      return(class)
+
+    } else if (optimise_class == "f1_score") {
+      f1_scores <- sapply(values, function(thres) {
+        class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+        score <- evaluateModel(class, y)$Perf_F1score
+      })
+      # plot(seq(0.01,0.99,0.01), f1_scores)
+      threshold <- values[which.max(f1_scores)]
+    } else if (optimise_class == "ROC01") {
+      roc_scores <- sapply(values, function(thres) {
+        class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+
+        distance <- (evaluateModel(class, y)$Perf_Specificity-0)^2 +
+          (evaluateModel(class, y)$Perf_Sensitivity-1)^2
+      }
+      )
+      # plot(seq(0.01,0.99,0.01), roc_scores)
+      threshold <- values[which.min(roc_scores)]
+    } else if (optimise_class == "custom") {
+      # cost_scores <- sapply(values, function(thres) {
+      #   cost = 0
+      #
+      #   cost+=(TN*-10000)
+      #   cost+=(FP*1000)
+      #   cost+=(FN*1500)
+      #   cost+=(TP*-20000)
+      #
+      # }
+      # )
+      # # plot(seq(0.01,0.99,0.01), cost_scores)
+      # threshold <- values[which.min(cost_scores)]
+    }
+    class <- as.numeric(ifelse(predictions >= threshold, 1, 0))
+
+    return(class)
+
+  } else if (return == "predict_prob") {
+    predictions <- predict(model_lasso, newx =  data.matrix(x), type="response", s="lambda.min")
+    return(predictions)
+  }
+}
+
+
+lasso_cyclops <- function(x, y, model_lasso = NULL, return = "features") {
+  if (is.null(model_lasso)) {
+    # Lasso logistic regression using cyclops (large scale regularized regressions)
+    outcomes <- data.frame(rowId = 1:length(y), y = y)
+
+    x <- data.frame(data.matrix(x))
+    x$rowId = rownames(x)
+    # x <- cbind("rowId" = 1:nrow(x), x)
+    covariates = reshape2::melt(x, id.vars = "rowId", variable.name = "covariateId", value.name = "covariateValue")
+    covariates$rowId <- as.integer(covariates$rowId)
+    covariates$covariateId <- as.integer(covariates$covariateId)
+
+    cyclopsData <- convertToCyclopsData(outcomes = outcomes, covariates = covariates, modelType = "lr",  addIntercept = TRUE)
+    model_lasso <- fitCyclopsModel(cyclopsData, prior = createPrior("none"))
+  }
+
+  if (return == "features") {
+    coef <- coef(model_lasso)
+
+    coef_ordered <- coef[order(abs(coef), decreasing = TRUE)]
+    names_ordered <- names(coef)[order(abs(coef), decreasing = TRUE)]
+    names(coef_ordered) <- names_ordered
+
+    coef_ordered <- coef_ordered[names(coef_ordered) != "(Intercept)"]
+    n_sel <- sum(!is.na(coef_ordered))
+
+    features <- x[,as.integer(names(coef_ordered[1:n_sel]))]
+
+    return(features)
+  } else if (return == "predict_prob") {
+    warning("Predictions cyclops currently only for train data!")
+
+    predictions <- predict(model_lasso) # response scale
+    return(predictions)
+  }
+
+  # TODO: alternative class = meanLinearPredictor?
+
+}
+

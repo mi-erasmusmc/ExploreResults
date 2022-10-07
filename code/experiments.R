@@ -4,32 +4,29 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
   methods_output <- data.frame()
   explore_output <- data.frame()
 
+  explore_options$Option <- 1:nrow(explore_options)
   write.csv(explore_options, file.path(output_path, "explore_options.csv"), row.names = FALSE)
 
-  explore_options$Time <- NA
-  explore_options$Model <- NA
-  explore_options$Performance_Accuracy <- NA
-
-  for (d in data_name_list) { # d <- data_name_list[2]
+  for (d in data_name_list) { # d <- data_name_list[1]
     ParallelLogger::logInfo(print(paste0("Checking computation times for ", d, " data")))
 
     ## LOAD DATA
     data <- farff::readARFF(file.path(getwd(), "data", d))
 
     if (grepl(pattern = "IPCI/", d)) {
-      # colnames(data)[1:(ncol(data)-1)] <- paste0("var_", colnames(data)[1:(ncol(data)-1)]) # add var to colnames (numbers don't work)
       # colnames(data)[1:(ncol(data)-1)] <- stringr::str_split(colnames(data)[1:(ncol(data)-1)], '\\([0-9]|[0-9]\\)', simplify = TRUE)[,2]
-      colnames(data)[1:(ncol(data)-1)] <- paste0("var_", 1:(ncol(data)-1))
-
+      colnames(data)[1:(ncol(data)-1)] <- paste0("var_", 1:(ncol(data)-1)) # add var to colnames (numbers don't work)
     }
 
     d <- gsub(pattern = ".arff", replacement = "", d, fixed = TRUE)
-    d <- gsub(pattern = "IPCI/", replacement = "", d, fixed = TRUE)
+    d <- gsub(pattern = "IPCI/new/", replacement = "", d, fixed = TRUE)
+    d <- gsub(pattern = "IPCI/samples/", replacement = "", d, fixed = TRUE)
 
     # Run checks
     data <- runCheckData(data, d)
 
     # Summarize data
+    # TODO: count outcomes test data?
     summary_data <- summarizeData(summary_data, data, d)
 
     # Create train/test split
@@ -37,8 +34,6 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
 
     # Correct imbalance in both train data (leave test data the same)
     split_data[[1]] <- oversample(split_data[[1]], summary_data, sampling_strategy, sample_size, d)
-
-    # TODO: count outcomes test data?
 
     bound = NULL;
     models <- setNames(data.table(matrix(0, nrow = 0, ncol = ncol(data)+3)), c("method", "iteration", "intercept", colnames(data)[1:(ncol(data)-1)], "model size"))
@@ -50,79 +45,41 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
       for (i in 1:num_iterations) { # i <- 1
         # Create model predictions and record time
         time_start <- Sys.time()
-
         result <- createModel(m, split_data[[1]], data_path, split_data[[2]], d, output_path, models, i, explore_options, bound)
-
         time_end <- Sys.time()
 
-        # Save model and evaluate predictions
-        models <- rbind(models, result[[2]])
-
-        # TODO: fix automatic explore!
-        # eval <- evaluateModel(result[[1]], split_data[[2]]$class)
-        # methods_output <- rbind(methods_output, c(list(Time = difftime(time_end, time_start, units = "mins"), Model = NA, Performance_Accuracy = eval[[ "accuracy"]], Performance_AUC = eval[["auc_roc"]], Performance_AUPRC = eval[["auc_pr"]], Data = d, Method = m, Iteration = i, Option = o)))
-
         for (o in 1:length(result[[1]])) {
-          eval <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
-          methods_output <- rbind(methods_output, c(list(Time = difftime(time_end, time_start, units = "mins"), Model = NA,
-                                                         Performance_Accuracy = eval[[ "accuracy"]], Performance_Sensitivity = eval[[ "sensitivity"]],
-                                                         Performance_Specificity = eval[[ "specificity"]], Performance_PPV = eval[[ "PPV"]],
-                                                         Performance_NPV = eval[[ "NPV"]], Performance_AUC = eval[["auc_roc"]],
-                                                         Performance_AUPRC = eval[["auc_pr"]],
-                                                         Performance_BalancedAccuracy = eval[["balanced_accuracy"]],
-                                                         Performance_F1score = eval[["F1_score"]],
-                                                         Data = d, Method = m, Iteration = i, Option = o)))
-        }
+          # Save model and evaluate predictions
+          models <- rbind(models, result[[2]][[o]])
 
-        if (m == "lasso" && i == 1) { # Create accuracy bound from lasso performance
-          bound <- result[[3]]
-        } else if (m %like% "explore") { # Save additional output explore
-          explore_output <- rbind(explore_output, result[[3]])
+          eval_test <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
+          eval_train <- result[[3]][[o]]
+
+          eval <- append(eval_test, eval_train)
+          names(eval) <- c(paste0(names(eval_test), "_Test"), paste0(names(eval_train), "_Train"))
+          methods_output <- rbind(methods_output, c(append(list(Time = difftime(time_end, time_start, units = "mins"), Data = d, Method = m, Iteration = i, Option = o), eval)))
+
+          if (m == "lasso" && i == 1) { # Create accuracy bound from lasso performance
+            bound <- result[[4]][[o]]
+          } else if (m %like% "explore") { # Save additional output explore
+            explore_output <- rbind(explore_output, result[[4]][[o]])
+          }
+
         }
       }
 
-      # Save update each time one method is finished
-      # TODO: save files to temp folder? (redundant at the end)
-      write.csv(round_dt(models, 3), file.path(output_path, paste0("models_", d, ".csv")), row.names = FALSE)
-      write.csv(methods_output, file.path(output_path, paste0("output_methods_", d, ".csv")), row.names = FALSE)
-      write.csv(explore_output, file.path(output_path, paste0("explore_output_", d, ".csv")), row.names = FALSE)
-      write.csv(summary_data, file.path(output_path, paste0("summary_data_", d, ".csv")), row.names = FALSE)
+      write.csv(models, file.path(output_path, paste0("models_", d, ".csv")), row.names = FALSE)
     }
   }
 
-  # TODO: group by ... and aggregate results over different i
-  write.csv(methods_output, file.path(output_path, paste0("output_methods.csv")), row.names = FALSE)
-  write.csv(explore_output, file.path(output_path, paste0("explore_output.csv")), row.names = FALSE)
   write.csv(summary_data, file.path(output_path, paste0("summary_data.csv")), row.names = FALSE)
+  write.csv(explore_output, file.path(output_path, paste0("explore_output.csv")), row.names = FALSE)
+
+  cols_group <- c("Data", "Method", "Option")
+  cols_other <- colnames(methods_output)[!colnames(methods_output) %in% c(cols_group, "Iteration")]
+  methods_output <- data.table(methods_output)
+  methods_output = methods_output[,lapply(.SD, mean), .SDcols = cols_other, by = cols_group]
+  write.csv(methods_output, file.path(output_path, paste0("output_methods.csv")), row.names = FALSE)
 
   return(list(explore_output, methods_output))
 }
-
-
-evaluateModel <- function(predictions, real) {
-
-  roc <- PRROC::roc.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)
-
-  # TODO: solve this in a nicer way (fails if predictions all zero)
-  pr <- NA
-  try(pr <- PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, silent = TRUE)
-
-  # plot(roc)
-  # plot(pr)
-
-  conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
-  summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
-
-  accuracy <- summary_performance$overall['Accuracy']
-  sensitivity <- caret::sensitivity(conf_matrix)
-  specificity <- caret::specificity(conf_matrix)
-  PPV <- summary_performance$byClass['Pos Pred Value']
-  NPV <- summary_performance$byClass['Neg Pred Value']
-  balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
-  F1_score <- summary_performance$byClass['F1']
-
-  results <- list(auc_roc=roc$auc, auc_pr=pr, accuracy=accuracy, sensitivity=sensitivity, specificity=specificity, PPV=PPV, NPV=NPV, balanced_accuracy=balanced_accuracy, F1_score=F1_score)
-
-  return(results)
-}
-
