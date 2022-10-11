@@ -32,10 +32,12 @@ evaluateModel <- function(predictions, real) {
     warning('No variation in predictions!')
   }
 
-  auc <- pROC::auc(real, predictions, levels = c("0", "1"), direction = "<")
-  partial_auc <- pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<")
+  roc <- pROC::roc(real, predictions, levels = c("0", "1"), direction = "<")
 
-  # roc <- PRROC::roc.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)
+  curve_TPR <- roc$sensitivities
+  curve_FPR <- 1 - roc$specificities
+
+  partial_auc <- pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<")
 
   pr <- NA
   try(pr <- PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, silent = TRUE)
@@ -54,7 +56,7 @@ evaluateModel <- function(predictions, real) {
   balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
   F1_score <- summary_performance$byClass['F1']
 
-  results <- list(Perf_AUC= auc, # roc$auc,
+  results <- list(Perf_AUC= roc$auc,
                   Perf_AUPRC=pr,
                   Perf_PAUC=partial_auc,
                   Perf_Accuracy=accuracy,
@@ -63,8 +65,9 @@ evaluateModel <- function(predictions, real) {
                   Perf_PPV=PPV,
                   Perf_NPV=NPV,
                   Perf_BalancedAccuracy=balanced_accuracy,
-                  Perf_F1score=F1_score)
-
+                  Perf_F1score=F1_score,
+                  Curve_TPR=paste(curve_TPR, collapse = "-"),
+                  Curve_FPR=paste(curve_FPR, collapse = "-"))
   return(results)
 }
 
@@ -74,7 +77,6 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
   # Lasso logistic regression using glmnet
   if (is.null(model_lasso)) {
     model_lasso <- glmnet::cv.glmnet(x=data.matrix(x), y = y, alpha = 1, standardize = TRUE, nfolds = 5, family = "binomial")
-
   }
 
   if (return == "model") {
@@ -92,18 +94,32 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
     features <- x[,names(coef_ordered[1:n_sel])]
 
     return(features)
+
+  } else if (return == "predict_prob") {
+    predictions <- predict(model_lasso, newx =  data.matrix(x), type="response", s="lambda.min")
+    return(predictions)
+
   } else if (return == "predict_class") {
     predictions <- predict(model_lasso, newx = data.matrix(x), type="response", s="lambda.min")
 
-    values <- seq(0.01,0.99,0.01)
-    if (optimise_class == "default") {
+    if (optimise_class == "default lasso") {
       class <- as.numeric(predict(model_lasso, newx = data.matrix(x), type="class", s="lambda.min"))
-      return(class)
+    } else {
+      class <- prob_to_class(predictions = predictions, real = y, optimise_class = optimise_class)
+    }
+    return(class)
+  }
+}
 
-    } else if (optimise_class == "f1_score") {
+prob_to_class <- function(predictions, real, optimise_class = "ROC01") {
+  values <- seq(0.01,0.99,0.01)
+  suppressWarnings({
+
+
+    if (optimise_class == "f1_score") {
       f1_scores <- sapply(values, function(thres) {
         class <- as.numeric(ifelse(predictions >= thres, 1, 0))
-        score <- evaluateModel(class, y)$Perf_F1score
+        score <- evaluateModel(class, real)$Perf_F1score
       })
       # plot(seq(0.01,0.99,0.01), f1_scores)
       threshold <- values[which.max(f1_scores)]
@@ -111,8 +127,8 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
       roc_scores <- sapply(values, function(thres) {
         class <- as.numeric(ifelse(predictions >= thres, 1, 0))
 
-        distance <- (evaluateModel(class, y)$Perf_Specificity-0)^2 +
-          (evaluateModel(class, y)$Perf_Sensitivity-1)^2
+        distance <- (evaluateModel(class, real)$Perf_Specificity-0)^2 +
+          (evaluateModel(class, real)$Perf_Sensitivity-1)^2
       }
       )
       # plot(seq(0.01,0.99,0.01), roc_scores)
@@ -131,14 +147,12 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
       # # plot(seq(0.01,0.99,0.01), cost_scores)
       # threshold <- values[which.min(cost_scores)]
     }
-    class <- as.numeric(ifelse(predictions >= threshold, 1, 0))
 
-    return(class)
+  })
+  class <- as.numeric(ifelse(predictions >= threshold, 1, 0))
 
-  } else if (return == "predict_prob") {
-    predictions <- predict(model_lasso, newx =  data.matrix(x), type="response", s="lambda.min")
-    return(predictions)
-  }
+  return(class)
+
 }
 
 

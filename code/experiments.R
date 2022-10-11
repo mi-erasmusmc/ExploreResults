@@ -52,11 +52,29 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
           # Save model and evaluate predictions
           models <- rbind(models, result[[2]][[o]])
 
-          eval_test <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
+          eval_test <- evaluateModel(result[[1]][[o]], split_data[[2]]$class) # class for explore, prob for all others
+          if (m != "explore") {
+            eval_test_prob <- eval_test
+            eval_test_class <- evaluateModel(prob_to_class(result[[1]][[o]], split_data[[2]]$class), split_data[[2]]$class)
+          } else {
+            eval_test_prob <- list(Perf_AUC=NA,
+                                   Perf_AUPRC=NA,
+                                   Perf_PAUC=NA,
+                                   Perf_Accuracy=NA,
+                                   Perf_Sensitivity=NA,
+                                   Perf_Specificity=NA,
+                                   Perf_PPV=NA,
+                                   Perf_NPV=NA,
+                                   Perf_BalancedAccuracy=NA,
+                                   Perf_F1score=NA,
+                                   Curve_TPR=NA,
+                                   Curve_FPR=NA)
+            eval_test_class <- eval_test
+          }
           eval_train <- result[[3]][[o]]
 
-          eval <- append(eval_test, eval_train)
-          names(eval) <- c(paste0(names(eval_test), "_Test"), paste0(names(eval_train), "_Train"))
+          eval <- append(append(eval_test_class, eval_test_prob), eval_train)
+          names(eval) <- c(paste0(names(eval_test_class), "_Test_Class"), paste0(names(eval_test_prob), "_Test_Prob"), paste0(names(eval_train), "_Train_Class"))
           methods_output <- rbind(methods_output, c(append(list(Time = difftime(time_end, time_start, units = "mins"), Data = d, Method = m, Iteration = i, Option = o), eval)))
 
           if (m == "lasso" && i == 1) { # Create accuracy bound from lasso performance
@@ -74,11 +92,6 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
 
   write.csv(summary_data, file.path(output_path, paste0("summary_data.csv")), row.names = FALSE)
   write.csv(explore_output, file.path(output_path, paste0("explore_output.csv")), row.names = FALSE)
-
-  cols_group <- c("Data", "Method", "Option")
-  cols_other <- colnames(methods_output)[!colnames(methods_output) %in% c(cols_group, "Iteration")]
-  methods_output <- data.table(methods_output)
-  methods_output = methods_output[,lapply(.SD, mean), .SDcols = cols_other, by = cols_group]
   write.csv(methods_output, file.path(output_path, paste0("output_methods.csv")), row.names = FALSE)
 
   return(list(explore_output, methods_output))

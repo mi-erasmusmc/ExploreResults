@@ -20,7 +20,8 @@ outputFolder <- file.path(local, "output")
 #                              function(g) sub("timings_", "", g)))
 
 # TODO: change to automatically update?
-resultFolders <- list("2022-10-07" = "timings_2022-10-07",
+resultFolders <- list("2022-10-11" = "timings_2022-10-11",
+                       "2022-10-07" = "timings_2022-10-07",
                       "2022-08-12" = "timings_2022-08-12")
 
 writeLines("Data Loaded")

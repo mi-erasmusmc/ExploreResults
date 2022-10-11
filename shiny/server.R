@@ -103,7 +103,6 @@ server <- function(input, output, session) {
       ylab("Time (in minutes)")
   })
 
-
   # TODO: add number of features
 
   output$exploreComparisonTitle <- renderText({
@@ -155,7 +154,16 @@ server <- function(input, output, session) {
     paste0("Compare results for output ", names(which(resultFolders == input$resultFolder)))
   })
 
-  output_methods <- reactive({read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))})
+  output_methods <- reactive({
+    plot_data <- read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))
+    plot_data <- plot_data[,!(colnames(plot_data) %in% c("Curve_TPR_Train_Class", "Curve_TPR_Test_Class","Curve_TPR_Test_Prob", "Curve_FPR_Train_Class", "Curve_FPR_Test_Class", "Curve_FPR_Test_Prob"))]
+
+    cols_group <- c("Data", "Method", "Option")
+    cols_other <- colnames(plot_data)[!colnames(plot_data) %in% c(cols_group, "Iteration")]
+    plot_data <- data.table(plot_data)
+    plot_data <- plot_data[,lapply(.SD, mean), .SDcols = cols_other, by = cols_group]
+
+    })
 
   output$comparisonTable <- renderDataTable({
     table <- t(output_methods())
@@ -211,6 +219,37 @@ server <- function(input, output, session) {
 
   output$comparisonF1score <- renderPlot({
     fig_compare_metric(paste0("Perf_F1score_", input$resultSet))
+  })
+
+  output$aucCurves <- renderPlot({
+    plot_data <- read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))
+
+    if (input$resultSet == "Test_Class") {
+      plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Train_Class", colnames(plot_data)) & !grepl("_Test_Prob", colnames(plot_data))]
+
+    } else if (input$resultSet == "Test_Prob") {
+      plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Train_Class", colnames(plot_data)) & !grepl("_Test_Class", colnames(plot_data))]
+
+    } else if (input$resultSet == "Train_Class") {
+      plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Test_Prob", colnames(plot_data)) & !grepl("_Test_Class", colnames(plot_data))]
+    }
+
+    plot_data$group <- paste0(plot_data$Method, "_option", plot_data$Option, "_iteration", plot_data$Iteration)
+    output <- lapply(1:nrow(plot_data), function(row) {
+      values_TPR <- as.numeric(strsplit(plot_data$Curve_TPR_Test[row], split = "-")[[1]])
+      values_FPR <- as.numeric(strsplit(plot_data$Curve_FPR_Test[row], split = "-")[[1]])
+
+      output <- data.frame(method = plot_data$group[row], values_TPR, values_FPR, row.names = NULL)
+
+      return(output)
+    })
+    output <- rbindlist(output)
+
+    output <- output[order(output$values_TPR, decreasing = FALSE),]
+
+    ggplot(output, aes(values_FPR, values_TPR, group = method, color = method)) +
+      geom_line() +
+      theme_bw()
   })
 
   output$modelTable <- renderDataTable({

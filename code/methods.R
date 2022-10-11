@@ -102,6 +102,11 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
   return(result)
 }
 
+# createModel
+# 1) pred lasso probability (in evaluation part: translate to class)
+# 2) model
+# 3) eval_train
+# 4) model specific: bound / explore details
 
 # https://www.pluralsight.com/guides/linear-lasso-and-ridge-regression-with-r
 #' @export
@@ -115,8 +120,10 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   test[,-which(names(test) == "class")] <- scale_data(test[,-which(names(test) == "class")], colMean, colSD)
 
   # Setting alpha = 1 implements lasso regression
-  # TODO: change here to Cyclops?
-  model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(3, -2, by = -.1), maxit=10000000, standardize = FALSE, nfolds = 5, family = "binomial")
+  # TODO: change here to helper function?
+
+  model_lasso <- lasso_glm(data.matrix(train[, -which(names(train) == "class")]), train$class, return = "model")
+  # model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(3, -2, by = -.1), maxit=10000000, standardize = FALSE, nfolds = 5, family = "binomial")
   # model_lasso <- glmnet::cv.glmnet(x=data.matrix(train[, -which(names(train) == "class")]), y = train$class, alpha = 1, lambda = 10^seq(2, -3, by = -.1), standardize = FALSE, nfolds = 5, family = "binomial", maxit=100000000)
   # plot(model_lasso)
 
@@ -130,21 +137,12 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   coef <- coef[coef != 0,]
   ParallelLogger::logInfo(paste0(method, ": ", paste(names(coef), coef, sep = ":", collapse = ",")))
 
-  class = TRUE
-  if (class) {
-    pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="class", s="lambda.min")
-  } else {
-    pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="response", s="lambda.min")
-  }
+  pred_lasso <- predict(model_lasso, newx = data.matrix(test[, -which(names(test) == "class")]), type="response", s="lambda.min")
 
   # Create accuracy bound from performance
-  if (class) {
-    pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
-  } else {
-    pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="response", s = "lambda.min")
-  }
-
-  eval_train <- evaluateModel(as.numeric(pred), train$class)
+  # pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
+  pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="response", s = "lambda.min")
+  eval_train <- evaluateModel(prob_to_class(as.numeric(pred), train$class), train$class)
   bound <- eval_train$accuracy
 
   # Transform character to numeric
@@ -173,7 +171,7 @@ run_randomforest<- function(method, train, test, data_name, output_path, models,
   # Transform character to numeric
   pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
 
-  eval_train <- evaluateModel(pred_randomforest, train$class)
+  eval_train <- evaluateModel(prob_to_class(pred_randomforest, train$class), train$class)
 
   return(list(list(pred_randomforest), list(model), list(eval_train)))
 }
@@ -194,12 +192,11 @@ run_ripper <- function(method, train, test, data_name, output_path, models, i) {
   ParallelLogger::logInfo(paste0(method,": ", model_string))
 
   test <- as.data.frame(lapply(test,factor),  stringsAsFactors=FALSE)
-  pred_ripper <- predict(model_ripper,test, type="class") # alternative: probability
+  pred_ripper <- predict(model_ripper,test, type="probability") # alternative: class
 
   # Transform factor to numeric
   pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
-
-  eval_train <- evaluateModel(pred_ripper, train$class)
+  eval_train <- evaluateModel(prob_to_class(pred_ripper, train$class), train$class)
 
   return(list(list(pred_ripper), list(model), list(eval_train)))
 }

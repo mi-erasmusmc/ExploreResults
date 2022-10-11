@@ -36,7 +36,7 @@ ui <- dashboardPage(
                        htmlOutput("dynamic_comparisonExplore")
       ),
       conditionalPanel(condition = "input.tabs=='methods'",
-                       selectInput("resultSet", label = "Performance", choices = c("Test", "Train"),  selected = "Test")
+                       selectInput("resultSet", label = "Performance", choices = c("Test_Class", "Test_Prob", "Train_Class"),  selected = "Test_Class")
       ),
       conditionalPanel(condition = "input.tabs=='methods'",
                        htmlOutput("dynamic_modelMethods")
@@ -147,6 +147,12 @@ ui <- dashboardPage(
                       plotOutput("comparisonPPV"),
                       plotOutput("comparisonNPV")
                   ),
+                ),
+                tabPanel(
+                  "AUC curves",
+                  br(),
+                  # textOutput("comparisonTitle"),
+                  plotOutput("aucCurves")
                 ),
                 tabPanel(
                   "Summary model",

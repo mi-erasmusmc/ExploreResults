@@ -117,7 +117,7 @@ for (data in data_list) {
           all_results <- rbind(all_results, c(Name = paste0("AUC GLM probability -", method, " - # var ", count, " # obs ", obs), eval))
           ParallelLogger::logInfo(paste0("AUC GLM probability -", method, " - # var ", count, " # obs ", obs, ": ", eval$Perf_AUC))
 
-          predict_glm <- lasso_glm(dataset[, !(colnames(dataset) %in% c("class"))], dataset$class, model_lasso, return = "predict_class", optimise_class = "default")
+          predict_glm <- lasso_glm(dataset[, !(colnames(dataset) %in% c("class"))], dataset$class, model_lasso, return = "predict_class", optimise_class = "default lasso")
           eval <- evaluateModel(predict_glm, dataset$class)
           all_results <- rbind(all_results, c(Name = paste0("AUC GLM class default -", method, " - # var ", count, " # obs ", obs), eval))
           ParallelLogger::logInfo(paste0("AUC GLM class default -", method, " - # var ", count, " # obs ", obs, ": ", eval$Perf_AUC))

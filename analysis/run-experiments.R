@@ -40,5 +40,6 @@ source("code/methods.R")
 source("code/experiments.R")
 source("code/helper.R")
 
+# parallel::mcaffinity(affinity = 1:30)
 output <- runExperiments(output_path, data_name_list, methods_list, explore_options, train_fraction = 0.9, num_iterations = 1)
 
