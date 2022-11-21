@@ -169,9 +169,10 @@ run_randomforest<- function(method, train, test, data_name, output_path, models,
   pred_randomforest <- predict(model_randomforest, test, type = "response")
 
   # Transform character to numeric
-  pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
+  pred_randomforest <- as.numeric(pred_randomforest)
+  # pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
 
-  eval_train <- evaluateModel(prob_to_class(pred_randomforest, train$class), train$class)
+  eval_train <- evaluateModel(prob_to_class(as.numeric(model_randomforest$predicted), train$class), train$class)
 
   return(list(list(pred_randomforest), list(model), list(eval_train)))
 }
@@ -180,7 +181,7 @@ run_randomforest<- function(method, train, test, data_name, output_path, models,
 #' @export
 run_ripper <- function(method, train, test, data_name, output_path, models, i) {
 
-  train <- as.data.frame(lapply(train,factor),  stringsAsFactors=FALSE)
+  train <- as.data.frame(lapply(train, factor),  stringsAsFactors=FALSE)
   model_ripper <- RWeka::JRip(class ~ . , train)
   # print(model_ripper)
 
@@ -192,11 +193,13 @@ run_ripper <- function(method, train, test, data_name, output_path, models, i) {
   ParallelLogger::logInfo(paste0(method,": ", model_string))
 
   test <- as.data.frame(lapply(test,factor),  stringsAsFactors=FALSE)
-  pred_ripper <- predict(model_ripper,test, type="probability") # alternative: class
+  pred_ripper <- predict(model_ripper, test, type="probability") # alternative: class
 
   # Transform factor to numeric
-  pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
-  eval_train <- evaluateModel(prob_to_class(pred_ripper, train$class), train$class)
+  pred_ripper <- as.numeric(pred_ripper)
+
+  # pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
+  eval_train <- evaluateModel(prob_to_class(model_ripper$predictions, train$class), train$class)
 
   return(list(list(pred_ripper), list(model), list(eval_train)))
 }
@@ -223,7 +226,7 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   # Save variables
   vars <- stringr::str_match_all(rule_string, "'\\s*(.*?)\\s*'")[[1]]
   vars <- lapply(colnames(models)[3:(ncol(models)-1)], function(c) ifelse(c %in% vars[,2], 1, 0))
-  model <- c(list(method, i), vars, do.call(sum, vars))
+  model <- c(list(paste0(method, "_option", o), i), vars, do.call(sum, vars))
   # TODO: add threshold instead
 
   ParallelLogger::logInfo(paste0(method,": ", rule_string))
@@ -249,6 +252,6 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   }
 
   explore_output_d_o_i <- list(Time = time_explore, Model = explore_model, Data = data_name, Iteration = i, Option = o)
-  return(list(list(pred_explore), list(model), list(eval_train), list(explore_output_d_o_i)))
+  return(list(list(as.numeric(pred_explore)), list(model), list(eval_train), list(explore_output_d_o_i)))
 }
 

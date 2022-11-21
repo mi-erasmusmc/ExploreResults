@@ -36,6 +36,11 @@ evaluateModel <- function(predictions, real) {
 
   curve_TPR <- roc$sensitivities
   curve_FPR <- 1 - roc$specificities
+  curve_thresholds <- roc$thresholds
+
+  N_outcomes <- length(roc$cases)
+  N_controls <- length(roc$controls)
+  N_total <- N_outcomes + N_controls
 
   partial_auc <- pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<")
 
@@ -66,8 +71,12 @@ evaluateModel <- function(predictions, real) {
                   Perf_NPV=NPV,
                   Perf_BalancedAccuracy=balanced_accuracy,
                   Perf_F1score=F1_score,
-                  Curve_TPR=paste(curve_TPR, collapse = "-"),
-                  Curve_FPR=paste(curve_FPR, collapse = "-"))
+                  Curve_TPR=paste(curve_TPR, collapse = "_"),
+                  Curve_FPR=paste(curve_FPR, collapse = "_"),
+                  Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                  N_outcomes=N_outcomes,
+                  N_controls=N_controls,
+                  N_total=N_total)
   return(results)
 }
 
@@ -113,42 +122,48 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
 
 prob_to_class <- function(predictions, real, optimise_class = "ROC01") {
   values <- seq(0.01,0.99,0.01)
-  suppressWarnings({
 
+  if (length(unique(predictions)) == 1) {
+    warning('No variation in predictions!')
+    threshold <- 0.5 # default
+  } else {
 
-    if (optimise_class == "f1_score") {
-      f1_scores <- sapply(values, function(thres) {
-        class <- as.numeric(ifelse(predictions >= thres, 1, 0))
-        score <- evaluateModel(class, real)$Perf_F1score
-      })
-      # plot(seq(0.01,0.99,0.01), f1_scores)
-      threshold <- values[which.max(f1_scores)]
-    } else if (optimise_class == "ROC01") {
-      roc_scores <- sapply(values, function(thres) {
-        class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+    suppressWarnings({
 
-        distance <- (evaluateModel(class, real)$Perf_Specificity-0)^2 +
-          (evaluateModel(class, real)$Perf_Sensitivity-1)^2
+      if (optimise_class == "f1_score") {
+        f1_scores <- sapply(values, function(thres) {
+          class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+          score <- evaluateModel(class, real)$Perf_F1score
+        })
+        # plot(seq(0.01,0.99,0.01), f1_scores)
+        threshold <- values[which.max(f1_scores)]
+      } else if (optimise_class == "ROC01") {
+        roc_scores <- sapply(values, function(thres) {
+          class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+
+          distance <- (evaluateModel(class, real)$Perf_Specificity-0)^2 +
+            (evaluateModel(class, real)$Perf_Sensitivity-1)^2
+        }
+        )
+        # plot(seq(0.01,0.99,0.01), roc_scores)
+        threshold <- values[which.min(roc_scores)]
+      } else if (optimise_class == "custom") {
+        # cost_scores <- sapply(values, function(thres) {
+        #   cost = 0
+        #
+        #   cost+=(TN*-10000)
+        #   cost+=(FP*1000)
+        #   cost+=(FN*1500)
+        #   cost+=(TP*-20000)
+        #
+        # }
+        # )
+        # # plot(seq(0.01,0.99,0.01), cost_scores)
+        # threshold <- values[which.min(cost_scores)]
       }
-      )
-      # plot(seq(0.01,0.99,0.01), roc_scores)
-      threshold <- values[which.min(roc_scores)]
-    } else if (optimise_class == "custom") {
-      # cost_scores <- sapply(values, function(thres) {
-      #   cost = 0
-      #
-      #   cost+=(TN*-10000)
-      #   cost+=(FP*1000)
-      #   cost+=(FN*1500)
-      #   cost+=(TP*-20000)
-      #
-      # }
-      # )
-      # # plot(seq(0.01,0.99,0.01), cost_scores)
-      # threshold <- values[which.min(cost_scores)]
-    }
+    })
+  }
 
-  })
   class <- as.numeric(ifelse(predictions >= threshold, 1, 0))
 
   return(class)

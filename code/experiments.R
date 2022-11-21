@@ -12,15 +12,21 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
 
     ## LOAD DATA
     data <- farff::readARFF(file.path(getwd(), "data", d))
+    varnames <- data.frame(original=colnames(data))
 
+    # Rename variables
     if (grepl(pattern = "IPCI/", d)) {
       # colnames(data)[1:(ncol(data)-1)] <- stringr::str_split(colnames(data)[1:(ncol(data)-1)], '\\([0-9]|[0-9]\\)', simplify = TRUE)[,2]
+
       colnames(data)[1:(ncol(data)-1)] <- paste0("var_", 1:(ncol(data)-1)) # add var to colnames (numbers don't work)
     }
 
     d <- gsub(pattern = ".arff", replacement = "", d, fixed = TRUE)
     d <- gsub(pattern = "IPCI/new/", replacement = "", d, fixed = TRUE)
     d <- gsub(pattern = "IPCI/samples/", replacement = "", d, fixed = TRUE)
+
+    varnames$new <- colnames(data)
+    write.csv(varnames, file.path(output_path, paste0("varnames_", d, ".csv")), row.names = FALSE)
 
     # Run checks
     data <- runCheckData(data, d)
@@ -68,7 +74,11 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
                                    Perf_BalancedAccuracy=NA,
                                    Perf_F1score=NA,
                                    Curve_TPR=NA,
-                                   Curve_FPR=NA)
+                                   Curve_FPR=NA,
+                                   Curve_Thresholds=NA,
+                                   N_outcomes=NA,
+                                   N_controls=NA,
+                                   N_total=NA)
             eval_test_class <- eval_test
           }
           eval_train <- result[[3]][[o]]
