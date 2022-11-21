@@ -155,6 +155,13 @@ ui <- dashboardPage(
                   plotOutput("aucCurves")
                 ),
                 tabPanel(
+                  "Net benefit",
+                  br(),
+                  # textOutput("comparisonTitle"),
+                  plotOutput("nbPlot"),
+                  dataTableOutput("nbTable")
+                ),
+                tabPanel(
                   "Summary model",
                   br(),
                   # textOutput("comparisonTitle"),
