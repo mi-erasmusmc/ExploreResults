@@ -38,6 +38,14 @@ evaluateModel <- function(predictions, real) {
   curve_FPR <- 1 - roc$specificities
   curve_thresholds <- roc$thresholds
 
+  if (length(curve_thresholds) > 20) {
+    indexes <- round(seq(from=1,to=length(curve_thresholds),length.out = 20))
+
+    curve_TPR <- curve_TPR[indexes]
+    curve_FPR <- curve_FPR[indexes]
+    curve_thresholds <- curve_thresholds[indexes]
+  }
+
   N_outcomes <- length(roc$cases)
   N_controls <- length(roc$controls)
   N_total <- N_outcomes + N_controls
@@ -50,33 +58,55 @@ evaluateModel <- function(predictions, real) {
   # plot(roc)
   # plot(pr)
 
-  conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
-  summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
+  if (all(unique(predictions) %in% c(0,1))) { # Return for classes
+    conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
+    summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
 
-  accuracy <- summary_performance$overall['Accuracy']
-  sensitivity <- summary_performance$byClass['Sensitivity']
-  specificity <- summary_performance$byClass['Specificity']
-  PPV <- summary_performance$byClass['Pos Pred Value']
-  NPV <- summary_performance$byClass['Neg Pred Value']
-  balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
-  F1_score <- summary_performance$byClass['F1']
+    accuracy <- summary_performance$overall['Accuracy']
+    sensitivity <- summary_performance$byClass['Sensitivity']
+    specificity <- summary_performance$byClass['Specificity']
+    PPV <- summary_performance$byClass['Pos Pred Value']
+    NPV <- summary_performance$byClass['Neg Pred Value']
+    balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
+    F1_score <- summary_performance$byClass['F1']
 
-  results <- list(Perf_AUC= roc$auc,
-                  Perf_AUPRC=pr,
-                  Perf_PAUC=partial_auc,
-                  Perf_Accuracy=accuracy,
-                  Perf_Sensitivity=sensitivity,
-                  Perf_Specificity=specificity,
-                  Perf_PPV=PPV,
-                  Perf_NPV=NPV,
-                  Perf_BalancedAccuracy=balanced_accuracy,
-                  Perf_F1score=F1_score,
-                  Curve_TPR=paste(curve_TPR, collapse = "_"),
-                  Curve_FPR=paste(curve_FPR, collapse = "_"),
-                  Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
-                  N_outcomes=N_outcomes,
-                  N_controls=N_controls,
-                  N_total=N_total)
+    results <- list(Perf_AUC= roc$auc,
+                    Perf_AUPRC=pr,
+                    Perf_PAUC=partial_auc,
+                    Perf_Accuracy=accuracy,
+                    Perf_Sensitivity=sensitivity,
+                    Perf_Specificity=specificity,
+                    Perf_PPV=PPV,
+                    Perf_NPV=NPV,
+                    Perf_BalancedAccuracy=balanced_accuracy,
+                    Perf_F1score=F1_score,
+                    Curve_TPR=paste(curve_TPR, collapse = "_"),
+                    Curve_FPR=paste(curve_FPR, collapse = "_"),
+                    Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                    N_outcomes=N_outcomes,
+                    N_controls=N_controls,
+                    N_total=N_total)
+
+
+  } else { # Return for probabilities
+    results <- list(Perf_AUC= roc$auc,
+                    Perf_AUPRC=pr,
+                    Perf_PAUC=partial_auc,
+                    # Perf_Accuracy=accuracy,
+                    # Perf_Sensitivity=sensitivity,
+                    # Perf_Specificity=specificity,
+                    # Perf_PPV=PPV,
+                    # Perf_NPV=NPV,
+                    # Perf_BalancedAccuracy=balanced_accuracy,
+                    # Perf_F1score=F1_score,
+                    Curve_TPR=paste(curve_TPR, collapse = "_"),
+                    Curve_FPR=paste(curve_FPR, collapse = "_"),
+                    Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                    N_outcomes=N_outcomes,
+                    N_controls=N_controls,
+                    N_total=N_total)
+  }
+
   return(results)
 }
 
@@ -120,7 +150,7 @@ lasso_glm <- function(x, y, model_lasso = NULL, return = "model", optimise_class
   }
 }
 
-prob_to_class <- function(predictions, real, optimise_class = "ROC01") {
+prob_to_class <- function(predictions, real, optimise_class = "AUC") {
   values <- seq(0.01,0.99,0.01)
 
   if (length(unique(predictions)) == 1) {
@@ -129,8 +159,14 @@ prob_to_class <- function(predictions, real, optimise_class = "ROC01") {
   } else {
 
     suppressWarnings({
-
-      if (optimise_class == "f1_score") {
+      if (optimise_class == "AUC") {
+        f1_scores <- sapply(values, function(thres) {
+          class <- as.numeric(ifelse(predictions >= thres, 1, 0))
+          score <- evaluateModel(class, real)$Perf_AUC
+        })
+        # plot(seq(0.01,0.99,0.01), f1_scores)
+        threshold <- values[which.max(f1_scores)]
+      } else if (optimise_class == "f1_score") {
         f1_scores <- sapply(values, function(thres) {
           class <- as.numeric(ifelse(predictions >= thres, 1, 0))
           score <- evaluateModel(class, real)$Perf_F1score
@@ -211,3 +247,30 @@ lasso_cyclops <- function(x, y, model_lasso = NULL, return = "features") {
 
 }
 
+explore_AUCcurve <- function(train, data_path, test, data_name, output_path_curve = paste0(output_path, "/explore/AUC_curve"), models, i, o, explore_options, bound) {
+
+  explore_options_curve <- explore_options[o,]
+  explore_options_curve$Maximize <- "SENSITIVITY"
+  explore_options_curve$Constraint_Specificity <- NULL
+  explore_options_curve <- cbind(explore_options_curve, Constraint_Specificity = seq(0.05,0.95,0.1), row.names = NULL)
+
+  # Run EXPLORE with explore_options_curve
+  if (!dir.exists(output_path_curve)) {
+    dir.create(output_path_curve)
+  }
+
+  result_curve <- createModel("explore", train, data_path, test, data_name, output_path_curve, models, i, explore_options_curve, bound, FALSE)
+
+  # Combine all these results
+  curve_TPR <- c(1,0)
+  curve_FPR <- c(1,0)
+
+  for (c in 1:length(result_curve[[1]])) {
+    eval_test_curve <- evaluateModel(result_curve[[1]][[c]], test$class) # class for explore
+
+    curve_TPR[c+2] <- eval_test_curve$Perf_Sensitivity
+    curve_FPR[c+2] <- 1- eval_test_curve$Perf_Specificity
+  }
+
+  return(list(curve_TPR, curve_FPR))
+}

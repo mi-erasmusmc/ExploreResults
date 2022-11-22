@@ -168,25 +168,31 @@ server <- function(input, output, session) {
   output_methods_curve <- reactive({
     plot_data <- read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))
 
-    if (input$resultSet == "Test_Class") {
+    # TODO: rewrite without if statements (add Train Prob?)
+    if (paste0(input$performance, "_", input$evaluate) == "Test_Class") {
       plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Train_Class", colnames(plot_data)) & !grepl("_Test_Prob", colnames(plot_data))]
 
-    } else if (input$resultSet == "Test_Prob") {
+    } else if (paste0(input$performance, "_", input$evaluate)  == "Test_Prob") {
       plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Train_Class", colnames(plot_data)) & !grepl("_Test_Class", colnames(plot_data))]
 
-    } else if (input$resultSet == "Train_Class") {
+    } else if (paste0(input$performance, "_", input$evaluate)  == "Train_Class") {
       plot_data <- plot_data[plot_data$Data == input$dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Test_Prob", colnames(plot_data)) & !grepl("_Test_Class", colnames(plot_data))]
     }
 
     plot_data$group <- paste0(plot_data$Method, "_option", plot_data$Option, "_iteration", plot_data$Iteration)
-    colnames(plot_data) <- stringr::str_replace(colnames(plot_data), paste0("_", input$resultSet), "")
+    colnames(plot_data) <- stringr::str_replace(colnames(plot_data), paste0("_", input$performance, "_", input$evaluate), "")
 
     output <- lapply(1:nrow(plot_data), function(row) {
       values_TPR <- as.numeric(strsplit(plot_data$Curve_TPR[row], split = "_")[[1]])
       values_FPR <- as.numeric(strsplit(plot_data$Curve_FPR[row], split = "_")[[1]])
-      values_threshold <- as.numeric(strsplit(plot_data$Curve_Thresholds[row], split = "_")[[1]])
+      if (!is.na(plot_data$Curve_Thresholds[row])) {
+        values_threshold <- as.numeric(strsplit(plot_data$Curve_Thresholds[row], split = "_")[[1]])
+      } else {
+        values_threshold <- NA
+      }
 
       output <- data.frame(method = plot_data$group[row], values_TPR, values_FPR, values_threshold, N_outcomes = plot_data$N_outcomes[row], N_controls = plot_data$N_controls[row], N_total = plot_data$N_total[row], row.names = NULL)
+      output <- unique(output)
 
       return(output)
     })
@@ -212,43 +218,43 @@ server <- function(input, output, session) {
   }
 
   output$comparisonAUC <- renderPlot({
-    fig_compare_metric(paste0("Perf_AUC_", input$resultSet))
+    fig_compare_metric(paste0("Perf_AUC_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonAUPRC <- renderPlot({
-    fig_compare_metric(paste0("Perf_AUPRC_", input$resultSet))
+    fig_compare_metric(paste0("Perf_AUPRC_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonPAUC <- renderPlot({
-    fig_compare_metric(paste0("Perf_PAUC_", input$resultSet))
+    fig_compare_metric(paste0("Perf_PAUC_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonAccuracy <- renderPlot({
-    fig_compare_metric(paste0("Perf_Accuracy_", input$resultSet))
+    fig_compare_metric(paste0("Perf_Accuracy_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonSensitivity <- renderPlot({
-    fig_compare_metric(paste0("Perf_Sensitivity_", input$resultSet))
+    fig_compare_metric(paste0("Perf_Sensitivity_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonSpecificity <- renderPlot({
-    fig_compare_metric(paste0("Perf_Specificity_", input$resultSet))
+    fig_compare_metric(paste0("Perf_Specificity_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonPPV <- renderPlot({
-    fig_compare_metric(paste0("Perf_PPV_", input$resultSet))
+    fig_compare_metric(paste0("Perf_PPV_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonNPV <- renderPlot({
-    fig_compare_metric(paste0("Perf_PPV_", input$resultSet))
+    fig_compare_metric(paste0("Perf_PPV_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonBalancedAccuracy <- renderPlot({
-    fig_compare_metric(paste0("Perf_BalancedAccuracy_", input$resultSet))
+    fig_compare_metric(paste0("Perf_BalancedAccuracy_", input$performance, "_", input$evaluate))
   })
 
   output$comparisonF1score <- renderPlot({
-    fig_compare_metric(paste0("Perf_F1score_", input$resultSet))
+    fig_compare_metric(paste0("Perf_F1score_", input$performance, "_", input$evaluate))
   })
 
   output$aucCurves <- renderPlot({

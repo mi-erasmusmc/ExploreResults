@@ -31,12 +31,16 @@ ui <- dashboardPage(
       addInfo(menuItem("Compare methods", tabName = "methods"), "methodsInfo"),
 
       # Input parameters
+      # -> "Test_Class", "Test_Prob", "Train_Class"
       selectInput("resultFolder", label = "Result Folder", choices = resultFolders,  selected = resultFolders[1]),
       conditionalPanel(condition = "input.tabs=='explore'",
                        htmlOutput("dynamic_comparisonExplore")
       ),
       conditionalPanel(condition = "input.tabs=='methods'",
-                       selectInput("resultSet", label = "Performance", choices = c("Test_Class", "Test_Prob", "Train_Class"),  selected = "Test_Class")
+                       selectInput("performance", label = "Performance", choices = c("Train", "Test"),  selected = "Train")
+      ),
+      conditionalPanel(condition = "input.tabs=='methods'",
+                       selectInput("evaluate", label = "Evaluate", choices = c("Class", "Prob"),  selected = "Class")
       ),
       conditionalPanel(condition = "input.tabs=='methods'",
                        htmlOutput("dynamic_modelMethods")
@@ -93,7 +97,7 @@ ui <- dashboardPage(
                   dataTableOutput("exploreOptions")
                 ),
                 tabPanel(
-                  "Summary figures",
+                  "Summary time",
                   br(),
                   textOutput("exploreOutputTitle"),
                   br(),
@@ -105,7 +109,7 @@ ui <- dashboardPage(
                   )
                 ),
                 tabPanel(
-                  "Comparison",
+                  "Comparison time",
                   br(),
                   textOutput("exploreComparisonTitle"),
                   br(),

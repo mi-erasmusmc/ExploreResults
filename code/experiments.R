@@ -51,46 +51,60 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
       for (i in 1:num_iterations) { # i <- 1
         # Create model predictions and record time
         time_start <- Sys.time()
-        result <- createModel(m, split_data[[1]], data_path, split_data[[2]], d, output_path, models, i, explore_options, bound)
+        result <- createModel(m, split_data[[1]], data_path, split_data[[2]], d, output_path, models, i, explore_options, bound, TRUE)
         time_end <- Sys.time()
 
         for (o in 1:length(result[[1]])) {
           # Save model and evaluate predictions
           models <- rbind(models, result[[2]][[o]])
 
-          eval_test <- evaluateModel(result[[1]][[o]], split_data[[2]]$class) # class for explore, prob for all others
           if (m != "explore") {
-            eval_test_prob <- eval_test
+            eval_test_prob <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
             eval_test_class <- evaluateModel(prob_to_class(result[[1]][[o]], split_data[[2]]$class), split_data[[2]]$class)
           } else {
+
+          res <- explore_AUCcurve(train = split_data[[1]],
+                                    data_path = data_path,
+                                    test = split_data[[2]],
+                                    data_name = d,
+                                    output_path_curve = paste0(output_path, "/explore/AUC_curve_test"),
+                                    models,
+                                    i,
+                                    o,
+                                    explore_options,
+                                    bound)
+
+            # TODO: generate corresponding AUC value
             eval_test_prob <- list(Perf_AUC=NA,
                                    Perf_AUPRC=NA,
                                    Perf_PAUC=NA,
-                                   Perf_Accuracy=NA,
-                                   Perf_Sensitivity=NA,
-                                   Perf_Specificity=NA,
-                                   Perf_PPV=NA,
-                                   Perf_NPV=NA,
-                                   Perf_BalancedAccuracy=NA,
-                                   Perf_F1score=NA,
-                                   Curve_TPR=NA,
-                                   Curve_FPR=NA,
+                                   # Perf_Accuracy=NA,
+                                   # Perf_Sensitivity=NA,
+                                   # Perf_Specificity=NA,
+                                   # Perf_PPV=NA,
+                                   # Perf_NPV=NA,
+                                   # Perf_BalancedAccuracy=NA,
+                                   # Perf_F1score=NA,
+                                   Curve_TPR=paste(res[[1]], collapse = "_"),
+                                   Curve_FPR=paste(res[[2]], collapse = "_"),
                                    Curve_Thresholds=NA,
                                    N_outcomes=NA,
                                    N_controls=NA,
                                    N_total=NA)
-            eval_test_class <- eval_test
-          }
-          eval_train <- result[[3]][[o]]
 
-          eval <- append(append(eval_test_class, eval_test_prob), eval_train)
-          names(eval) <- c(paste0(names(eval_test_class), "_Test_Class"), paste0(names(eval_test_prob), "_Test_Prob"), paste0(names(eval_train), "_Train_Class"))
+            eval_test_class <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
+          }
+          eval_train_class <- result[[3]][[o]]
+          eval_train_prob <- result[[4]][[o]]
+
+          eval <- append(append(append(eval_test_class, eval_test_prob), eval_train_class), eval_train_prob)
+          names(eval) <- c(paste0(names(eval_test_class), "_Test_Class"), paste0(names(eval_test_prob), "_Test_Prob"), paste0(names(eval_train_class), "_Train_Class"), paste0(names(eval_train_prob), "_Train_Prob"))
           methods_output <- rbind(methods_output, c(append(list(Time = difftime(time_end, time_start, units = "mins"), Data = d, Method = m, Iteration = i, Option = o), eval)))
 
           if (m == "lasso" && i == 1) { # Create accuracy bound from lasso performance
-            bound <- result[[4]][[o]]
+            bound <- result[[5]][[o]]
           } else if (m %like% "explore") { # Save additional output explore
-            explore_output <- rbind(explore_output, result[[4]][[o]])
+            explore_output <- rbind(explore_output, result[[5]][[o]])
           }
 
         }
