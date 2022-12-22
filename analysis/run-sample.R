@@ -5,64 +5,39 @@ library(Cyclops)
 library(farff)
 library(factoextra) # pca
 
-source("code/helper.R")
+source("~/Documents/ExploreResults/code/helper.R")
 ParallelLogger::addDefaultFileLogger('log-preparation-data.txt')
 
 root <- "/home/amarkus/Documents"
-path <- file.path(root, "ExploreResults", "data", "IPCI")
+path <- file.path(root, "Benchmark problems", "19dec2022", "output", "IPCI")
 save_path <- file.path(path, "samples/")
 
 # input: high to low
-n_var <- c(100, 50, 20)
+n_var <- c(200, 100, 50, 20)
 max_obs <- c(100000)
 methods <- c("univariate") #
 # "lasso-cyclops", "pca"
 # methods <- c("univariate", "lasso-glm", "lasso-cyclops", "pca")
 benchmark_performance <- TRUE
-data_list <- "outpatientmortality"
-# data_list <- c("asthmastepup", "atrialfibrillation", "dementia", "outpatientmortality") # cover
+data_list <- c("hospitalreadmission", "eolconversation", "heartfailurestroke")
 
-# vversion 2 is on NEW IPCI DATA with FeatureExtraction restricted to high in the hierarchy
-# version 3 is with selected covariate list instead of default covariates
-
-for (data in data_list) { # data = data_list[2]
+for (data in data_list) { # data = data_list[1]
   ### 2. SELECT PREDICTION PROBLEM
-  if (data == "outpatientmortality") {
-    # outputFolder <- file.path(path, "OutpatientMortality_v1")
-    outputFolder <- file.path(path, "OutpatientMortality_v3")
-    # plpData <- loadPlpData(file.path(outputFolder, "PlpData_L1_T500300"))
-    plpData <- loadPlpData(file.path(outputFolder, "targetId_483_L1"))
-    # population <- readRDS(file.path(outputFolder, "StudyPop_L1_T500300_O9999_P1.rds"))
+  if (data == "hospitalreadmission") {
+    outputFolder <- file.path(path, "HospitalReadmission")
+    plpData <- loadPlpData(file.path(outputFolder, "targetId_1033_L1"))
     population <- readRDS(file.path(outputFolder, "Analysis_1", "plpResult", "runPlp.rds"))$prediction
-    file_name <- "outpatientmortality"
-  } else if (data == "asthmastepup") {
-    # outputFolder <- file.path(path, "AsthmaStepUp_v1")
-    outputFolder <- file.path(path, "AsthmaStepUp_v3")
-    # plpData <- loadPlpData(file.path(outputFolder, "PlpData_L1_T647"))
-    plpData <- loadPlpData(file.path(outputFolder, "targetId_647_L1"))
-    # population <- readRDS(file.path(outputFolder, "StudyPop_L1_T647_O648_P1.rds"))
+    file_name <- "hospitalreadmission"
+  } else if (data == "eolconversation") {
+    outputFolder <- file.path(path, "EoLConversation")
+    plpData <- loadPlpData(file.path(outputFolder, "targetId_1036_L1"))
     population <- readRDS(file.path(outputFolder, "Analysis_1", "plpResult", "runPlp.rds"))$prediction
-    file_name <- "asthmastepup"
-  } else if (data == "atrialfibrillation") {
-    outputFolder <- file.path(path, "AtrialFibrillation_v3")
-    plpData <- loadPlpData(file.path(outputFolder, "targetId_662_L1"))
-    # population = readRDS(file.path(outputFolder, "StudyPop_L1_T647_O648_P1.rds"))
+    file_name <- "eolconversation"
+  } else if (data == "heartfailurestroke") {
+    outputFolder <- file.path(path, "HeartfailureStroke")
+    plpData <- loadPlpData(file.path(outputFolder, "targetId_1060_L1"))
     population <- readRDS(file.path(outputFolder, "Analysis_1", "plpResult", "runPlp.rds"))$prediction
-    file_name <- "atrialfibrillation"
-  } else if (data == "cover") {
-    # outputFolder <- file.path(path, "COVER_v1")
-    # outputFolder <- file.path(path, "COVER_v2")
-    # plpData <- loadPlpData(file.path(outputFolder, "PlpData_L1_T1001"))
-    # population <- readRDS(file.path(outputFolder, "StudyPop_L1_T1001_O4001_P1.rds"))
-    file_name <- "cover"
-  } else if (data == "dementia") {
-    # outputFolder <- file.path(path, "Dementia_v1")
-    outputFolder <- file.path(path, "Dementia_v3")
-    # plpData <- loadPlpData(file.path(outputFolder, "PlpData_L1_T657"))
-    plpData <- loadPlpData(file.path(outputFolder, "targetId_657_L1"))
-    # population <- readRDS(file.path(outputFolder, "StudyPop_L1_T657_O658_P1.rds"))
-    population <- readRDS(file.path(outputFolder, "Analysis_1", "plpResult", "runPlp.rds"))$prediction
-    file_name <- "dementia"
+    file_name <- "heartfailurestroke"
   }
   population$evaluationType <- NULL
   all_results <- data.frame()

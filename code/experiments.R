@@ -36,10 +36,11 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
     summary_data <- summarizeData(summary_data, data, d)
 
     # Create train/test split
+    set.seed(2023)
     split_data <- splitTrainTest(data, d, output_path, frac = train_fraction)
 
     # Correct imbalance in both train data (leave test data the same)
-    split_data[[1]] <- oversample(split_data[[1]], summary_data, sampling_strategy, sample_size, d)
+    # split_data[[1]] <- oversample(split_data[[1]], summary_data, sampling_strategy, sample_size, d)
 
     bound = NULL;
     models <- setNames(data.table(matrix(0, nrow = 0, ncol = ncol(data)+3)), c("method", "iteration", "intercept", colnames(data)[1:(ncol(data)-1)], "model size"))
@@ -59,11 +60,11 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
           models <- rbind(models, result[[2]][[o]])
 
           if (m != "explore") {
-            eval_test_prob <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
-            eval_test_class <- evaluateModel(prob_to_class(result[[1]][[o]], split_data[[2]]$class), split_data[[2]]$class)
+            eval_test_prob <- evaluateModel(result[[1]][[o]], split_data[[2]]$class, paste0(result[[2]][[o]][[length(result[[2]][[o]])]], " covariates"))
+            eval_test_class <- evaluateModel(prob_to_class(result[[1]][[o]], split_data[[2]]$class), split_data[[2]]$class,  paste0(result[[2]][[o]][[length(result[[2]][[o]])]], " covariates"))
           } else {
 
-          res <- explore_AUCcurve(train = split_data[[1]],
+            res <- explore_AUCcurve(train = split_data[[1]],
                                     data_path = data_path,
                                     test = split_data[[2]],
                                     data_name = d,
@@ -78,21 +79,22 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
             eval_test_prob <- list(Perf_AUC=NA,
                                    Perf_AUPRC=NA,
                                    Perf_PAUC=NA,
-                                   # Perf_Accuracy=NA,
-                                   # Perf_Sensitivity=NA,
-                                   # Perf_Specificity=NA,
-                                   # Perf_PPV=NA,
-                                   # Perf_NPV=NA,
-                                   # Perf_BalancedAccuracy=NA,
-                                   # Perf_F1score=NA,
+                                   Perf_Accuracy=NA, # add curve?
+                                   Curve_Sensitivity=paste(res[[8]], collapse = "_"),
+                                   Curve_Specificity=paste(res[[9]], collapse = "_"),
+                                   Curve_PPV=paste(res[[10]], collapse = "_"),
+                                   Curve_NPV=paste(res[[11]], collapse = "_"),
+                                   Perf_BalancedAccuracy=NA, # add curve?
+                                   Perf_F1score=NA, # add curve?
                                    Curve_TPR=paste(res[[1]], collapse = "_"),
                                    Curve_FPR=paste(res[[2]], collapse = "_"),
-                                   Curve_Thresholds=NA,
-                                   N_outcomes=NA,
-                                   N_controls=NA,
-                                   N_total=NA)
+                                   Curve_Models=paste(res[[3]], collapse = "_"), # ADD everywhere?
+                                   Curve_Thresholds=paste(res[[4]], collapse = "_"),
+                                   N_outcomes=paste(res[[5]], collapse = "_"),
+                                   N_controls=paste(res[[6]], collapse = "_"),
+                                   N_total=paste(res[[7]], collapse = "_"))
 
-            eval_test_class <- evaluateModel(result[[1]][[o]], split_data[[2]]$class)
+            eval_test_class <- evaluateModel(result[[1]][[o]], split_data[[2]]$class, result[[6]][[o]])
           }
           eval_train_class <- result[[3]][[o]]
           eval_train_prob <- result[[4]][[o]]
@@ -106,7 +108,6 @@ runExperiments <- function(output_path, data_name_list, methods_list, explore_op
           } else if (m %like% "explore") { # Save additional output explore
             explore_output <- rbind(explore_output, result[[5]][[o]])
           }
-
         }
       }
 

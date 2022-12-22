@@ -5,6 +5,7 @@ library(reshape2)
 library(ggplot2)
 library(data.table)
 library(DT)
+library(plotly)
 
 # Set working directory (shiny folder)
 # if (!grepl("shiny$", getwd())) {
@@ -16,13 +17,22 @@ addResourcePath("workingdirectory", getwd())
 
 outputFolder <- file.path(local, "output")
 
-# outputfolders <- rev(sapply(list.dirs(file.path(local, "output"), recursive = FALSE, full.names = FALSE),
+# resultFolders <- rev(sapply(list.dirs(file.path(local, "output"), recursive = FALSE, full.names = FALSE),
 #                              function(g) sub("timings_", "", g)))
 
 # TODO: change to automatically update?
-resultFolders <- list("2022-10-11" = "timings_2022-10-11",
-                       "2022-10-07" = "timings_2022-10-07",
-                      "2022-08-12" = "timings_2022-08-12")
+resultFolders <- list("timings_2022-12-16" = "timings_2022-12-16",
+                      "timings_2022-12-16-rerun" = "timings_2022-12-16-rerun",
+                      "timings_2022-12-08" = "timings_2022-12-08",
+                      "timings_2022-12-07" = "timings_2022-12-07",
+                      "timings_2022-11-22" = "timings_2022-11-22")
 
 writeLines("Data Loaded")
+
+# check same sample?
+# d <- "iris_train_2_1.arff"
+# data1 <- farff::readARFF(file.path(outputFolder, "timings_2022-12-16", "explore", d))
+# data2 <- farff::readARFF(file.path(outputFolder, "timings_2022-12-08", "explore", d))
+#
+# sum(data1!=data2)
 

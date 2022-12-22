@@ -24,7 +24,7 @@ splitTrainTest <- function(data, d, output_path, frac = NULL, index = NULL) {
   # farff::writeARFF(train, paste0(output_path, "explore/", d, "_train.arff"))
   # farff::writeARFF(test, paste0(output_path, "explore/", d, "_test.arff"))
 
-  return(list(train,test))
+  return(list(train, test))
 }
 
 createModel <- function(method, train = NULL, data_path = NULL, test, data_name, output_path, models, i, explore_options, bound, run_AUCcurve, ...) {
@@ -52,6 +52,7 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
       methods_output_class <- list()
       methods_output_prob <- list()
       explore_output <- list()
+      explore_model <- list()
 
       # Preparations for settings
       if (any(explore_options$Sorted == TRUE)| any(explore_options$Constraint_Accuracy == "custom")) {
@@ -94,6 +95,7 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
         model <- append(model, result_o[[2]])
         methods_output_class <- append(methods_output_class, result_o[[3]])
         explore_output <- append(explore_output, result_o[[4]])
+        explore_model <- append(explore_model, result_o[[5]])
 
         # AUC curve
         if (run_AUCcurve) {
@@ -112,28 +114,27 @@ createModel <- function(method, train = NULL, data_path = NULL, test, data_name,
           eval_train_prob <- list(Perf_AUC=NA,
                                   Perf_AUPRC=NA,
                                   Perf_PAUC=NA,
-                                  # Perf_Accuracy=NA,
-                                  # Perf_Sensitivity=NA,
-                                  # Perf_Specificity=NA,
-                                  # Perf_PPV=NA,
-                                  # Perf_NPV=NA,
-                                  # Perf_BalancedAccuracy=NA,
-                                  # Perf_F1score=NA,
+                                  Perf_Accuracy=NA, # add curve?
+                                  Curve_Sensitivity=paste(res[[8]], collapse = "_"),
+                                  Curve_Specificity=paste(res[[9]], collapse = "_"),
+                                  Curve_PPV=paste(res[[10]], collapse = "_"),
+                                  Curve_NPV=paste(res[[11]], collapse = "_"),
+                                  Perf_BalancedAccuracy=NA, # add curve?
+                                  Perf_F1score=NA, # add curve?
                                   Curve_TPR=paste(res[[1]], collapse = "_"),
                                   Curve_FPR=paste(res[[2]], collapse = "_"),
-                                  Curve_Thresholds=NA,
-                                  N_outcomes=NA,
-                                  N_controls=NA,
-                                  N_total=NA)
+                                  Curve_Models=paste(res[[3]], collapse = "_"),
+                                  Curve_Thresholds=paste(res[[4]], collapse = "_"),
+                                  N_outcomes=paste(res[[5]], collapse = "_"),
+                                  N_controls=paste(res[[6]], collapse = "_"),
+                                  N_total=paste(res[[7]], collapse = "_"))
 
           methods_output_prob <- append(methods_output_prob, list(eval_train_prob))
 
         }
-
-
       }
 
-      result <- list(pred_explore, model, methods_output_class, methods_output_prob, explore_output)
+      result <- list(pred_explore, model, methods_output_class, methods_output_prob, explore_output, explore_model)
     }
   }
 
@@ -180,8 +181,8 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
   # Create accuracy bound from performance
   # pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="class", s = "lambda.min")
   pred <- predict(model_lasso, newx = data.matrix(train[, -which(names(train) == "class")]), type="response", s = "lambda.min")
-  eval_train_class <- evaluateModel(prob_to_class(as.numeric(pred), train$class), train$class)
-  eval_train_prob <- evaluateModel(as.numeric(pred), train$class)
+  eval_train_class <- evaluateModel(prob_to_class(as.numeric(pred), train$class), train$class, paste0(model[length(model)], " covariates"))
+  eval_train_prob <- evaluateModel(as.numeric(pred), train$class, paste0(model[length(model)], " covariates"))
   bound <- eval_train_class$accuracy
 
   # Transform character to numeric
@@ -194,7 +195,8 @@ run_lasso <- function(method, train, test, data_name, output_path, models, i) {
 #' @export
 run_randomforest<- function(method, train, test, data_name, output_path, models, i) {
 
-  model_randomforest <- randomForest::randomForest(factor(class) ~ ., data = train)
+  # params <- randomForest::tuneRF(x=train[, -which(names(train) == "class")], y=factor(train$class), stepFactor = 1.2, improve = 0.1, ntreeTry = 150, trace=T)
+  model_randomforest <- randomForest::randomForest(factor(class) ~ ., data = train, ntree=500, mtry=2, nodesize=1)
 
   # Save variables
   count_vars <- randomForest::varUsed(model_randomforest, by.tree = FALSE, count = TRUE)
@@ -205,14 +207,17 @@ run_randomforest<- function(method, train, test, data_name, output_path, models,
 
   ParallelLogger::logInfo(paste0(method,": ", paste(paste0(names(count_vars), " ", count_vars), collapse = ",")))
 
-  pred_randomforest <- predict(model_randomforest, test, type = "response")
-
   # Transform character to numeric
-  pred_randomforest <- as.numeric(pred_randomforest)
+  # pred_randomforest <- as.numeric(predict(model_randomforest, test, type = "response"))
+  pred_randomforest <- predict(model_randomforest, test, type = "prob")
+  pred_randomforest <- pred_randomforest[,2]
+
+  pred_randomforest_prob <- predict(model_randomforest, train, type = "prob")
+  pred_randomforest_prob <- pred_randomforest_prob[,2]
   # pred_randomforest <- as.numeric(levels(pred_randomforest))[pred_randomforest]
 
-  eval_train_class <- evaluateModel(prob_to_class(as.numeric(model_randomforest$predicted), train$class), train$class)
-  eval_train_prob <- evaluateModel(as.numeric(model_randomforest$predicted), train$class)
+  eval_train_class <- evaluateModel(prob_to_class(pred_randomforest_prob, train$class), train$class, paste0(model[length(model)], " covariates"))
+  eval_train_prob <- evaluateModel(pred_randomforest_prob, train$class, paste0(model[length(model)], " covariates"))
 
   return(list(list(pred_randomforest), list(model), list(eval_train_class), list(eval_train_prob)))
 }
@@ -239,8 +244,8 @@ run_ripper <- function(method, train, test, data_name, output_path, models, i) {
   pred_ripper <- as.numeric(pred_ripper)
 
   # pred_ripper <- as.numeric(levels(pred_ripper))[pred_ripper]
-  eval_train_class <- evaluateModel(prob_to_class(model_ripper$predictions, train$class), train$class)
-  eval_train_prob <- evaluateModel(model_ripper$predictions, train$class)
+  eval_train_class <- evaluateModel(prob_to_class(model_ripper$predictions, train$class), train$class, paste0(model[length(model)], " covariates"))
+  eval_train_prob <- evaluateModel(model_ripper$predictions, train$class, paste0(model[length(model)], " covariates"))
 
   return(list(list(pred_ripper), list(model), list(eval_train_class), list(eval_train_prob)))
 }
@@ -281,7 +286,7 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
     time_explore <- difftime(time_end, time_start, units = "mins")
 
     pred_explore_train <- Explore::predictExplore(model = rule_string, test_data = train) # TRAIN!
-    eval_train_class <- evaluateModel(pred_explore_train, train$class)
+    eval_train_class <- evaluateModel(pred_explore_train, train$class, explore_model)
   } else if (rule_string == "") {
     explore_model <- "model not available"
     eval_train_class <- NA
@@ -293,6 +298,6 @@ run_EXPLORE <- function(method, data_path, train, test, data_name, output_path, 
   }
 
   explore_output_d_o_i <- list(Time = time_explore, Model = explore_model, Data = data_name, Iteration = i, Option = o)
-  return(list(list(as.numeric(pred_explore)), list(model), list(eval_train_class), list(explore_output_d_o_i)))
+  return(list(list(pred_explore), list(model), list(eval_train_class), list(explore_output_d_o_i), list(explore_model)))
 }
 

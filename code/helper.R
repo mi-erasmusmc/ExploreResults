@@ -26,9 +26,32 @@ create_bootstrap_samples <- function(file, num_samples = 10, sample_size = 10000
   return(bootstrap_samples)
 }
 
-evaluateModel <- function(predictions, real) {
+evaluateModel <- function(predictions, real, model=NULL) {
 
-  if (length(unique(predictions)) == 1) {
+  if (length(predictions) != length(real)) {
+    warning("Length not same")
+  }
+
+  if (is.null(predictions)) {
+    results <- list(Perf_AUC=NA,
+                    Perf_AUPRC=NA,
+                    Perf_PAUC=NA,
+                    Perf_Accuracy=NA,
+                    Perf_Sensitivity=NA,
+                    Perf_Specificity=NA,
+                    Perf_PPV=NA,
+                    Perf_NPV=NA,
+                    Perf_BalancedAccuracy=NA,
+                    Perf_F1score=NA,
+                    Curve_TPR=NA,
+                    Curve_FPR=NA,
+                    Curve_Models=NA,
+                    Curve_Thresholds=NA,
+                    N_outcomes=NA,
+                    N_controls=NA,
+                    N_total=NA)
+  return(results)
+  } else if (length(unique(predictions)) == 1) {
     warning('No variation in predictions!')
   }
 
@@ -82,26 +105,44 @@ evaluateModel <- function(predictions, real) {
                     Perf_F1score=F1_score,
                     Curve_TPR=paste(curve_TPR, collapse = "_"),
                     Curve_FPR=paste(curve_FPR, collapse = "_"),
+                    Curve_Models=ifelse(is.null(model), NA, model),
                     Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
                     N_outcomes=N_outcomes,
                     N_controls=N_controls,
                     N_total=N_total)
 
-
   } else { # Return for probabilities
+
+    curve_sensitivity <- c()
+    curve_specificity <- c()
+    curve_PPV <- c()
+    curve_NPV <- c()
+
+    for (c in 1:length(curve_thresholds)) {
+
+      pred_class_c <- as.numeric(ifelse(predictions >= curve_thresholds[[c]], 1, 0))
+      eval <- evaluateModel(pred_class_c, real)
+
+      curve_sensitivity[c] <- eval$Perf_Sensitivity
+      curve_specificity[c] <- eval$Perf_Specificity
+      curve_PPV[c] <- eval$Perf_PPV
+      curve_NPV[c] <- eval$Perf_NPV
+    }
+
     results <- list(Perf_AUC= roc$auc,
                     Perf_AUPRC=pr,
                     Perf_PAUC=partial_auc,
-                    # Perf_Accuracy=accuracy,
-                    # Perf_Sensitivity=sensitivity,
-                    # Perf_Specificity=specificity,
-                    # Perf_PPV=PPV,
-                    # Perf_NPV=NPV,
-                    # Perf_BalancedAccuracy=balanced_accuracy,
-                    # Perf_F1score=F1_score,
+                    Perf_Accuracy=NA, # add curve?
+                    Curve_Sensitivity=paste(curve_sensitivity, collapse = "_"),
+                    Curve_Specificity=paste(curve_specificity, collapse = "_"),
+                    Curve_PPV=paste(curve_PPV, collapse = "_"),
+                    Curve_NPV=paste(curve_NPV, collapse = "_"),
+                    Perf_BalancedAccuracy=NA, # add curve?
+                    Perf_F1score=NA, # add curve?
                     Curve_TPR=paste(curve_TPR, collapse = "_"),
                     Curve_FPR=paste(curve_FPR, collapse = "_"),
                     Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                    Curve_Models=ifelse(is.null(model), NA, model),
                     N_outcomes=N_outcomes,
                     N_controls=N_controls,
                     N_total=N_total)
@@ -264,13 +305,33 @@ explore_AUCcurve <- function(train, data_path, test, data_name, output_path_curv
   # Combine all these results
   curve_TPR <- c(1,0)
   curve_FPR <- c(1,0)
+  curve_models <- c(NA, NA)
+  # curve_thresholds <- c(-Inf, Inf)
 
-  for (c in 1:length(result_curve[[1]])) {
+  curve_sensitivity <- c(0,1)
+  curve_specificity <- c(1,0)
+  curve_PPV <- c(0,1)
+  curve_NPV <- c(1,0)
+
+  for (c in length(result_curve[[1]]):1) {
     eval_test_curve <- evaluateModel(result_curve[[1]][[c]], test$class) # class for explore
 
     curve_TPR[c+2] <- eval_test_curve$Perf_Sensitivity
     curve_FPR[c+2] <- 1- eval_test_curve$Perf_Specificity
+    curve_models[c+2] <- result_curve[[6]][[c]]
+    # curve_thresholds[c+2] <- eval_test_curve$Perf_PPV
+    curve_thresholds <- 0.5
+
+    N_outcomes <- eval_test_curve$N_outcomes
+    N_controls <- eval_test_curve$N_controls
+    N_total <- eval_test_curve$N_total
+
+    curve_sensitivity[c+2] <- eval_test_curve$Perf_Sensitivity
+    curve_specificity[c+2] <- eval_test_curve$Perf_Specificity
+    curve_PPV[c+2] <- eval_test_curve$Perf_PPV
+    curve_NPV[c+2] <- eval_test_curve$Perf_NPV
   }
 
-  return(list(curve_TPR, curve_FPR))
+  return(list(curve_TPR, curve_FPR, curve_models, curve_thresholds, N_outcomes, N_controls, N_total,
+              curve_sensitivity, curve_specificity, curve_PPV, curve_NPV))
 }
