@@ -26,31 +26,52 @@ create_bootstrap_samples <- function(file, num_samples = 10, sample_size = 10000
   return(bootstrap_samples)
 }
 
-evaluateModel <- function(predictions, real, model=NULL) {
+evaluateModel <- function(predictions, real, model=NULL, class=T) {
 
   if (length(predictions) != length(real)) {
     warning("Length not same")
   }
 
   if (is.null(predictions)) {
-    results <- list(Perf_AUC=NA,
-                    Perf_AUPRC=NA,
-                    Perf_PAUC=NA,
-                    Perf_Accuracy=NA,
-                    Perf_Sensitivity=NA,
-                    Perf_Specificity=NA,
-                    Perf_PPV=NA,
-                    Perf_NPV=NA,
-                    Perf_BalancedAccuracy=NA,
-                    Perf_F1score=NA,
-                    Curve_TPR=NA,
-                    Curve_FPR=NA,
-                    Curve_Models=NA,
-                    Curve_Thresholds=NA,
-                    N_outcomes=NA,
-                    N_controls=NA,
-                    N_total=NA)
-  return(results)
+    # FOR CLASSES
+    if (class) {
+      results <- list(Perf_AUC=NA,
+                      Perf_AUPRC=NA,
+                      Perf_PAUC=NA,
+                      Perf_Accuracy=NA,
+                      Perf_Sensitivity=NA,
+                      Perf_Specificity=NA,
+                      Perf_PPV=NA,
+                      Perf_NPV=NA,
+                      Perf_BalancedAccuracy=NA,
+                      Perf_F1score=NA,
+                      Curve_TPR=NA,
+                      Curve_FPR=NA,
+                      Curve_Thresholds=NA,
+                      Curve_Models=NA,
+                      N_outcomes=NA,
+                      N_controls=NA,
+                      N_total=NA)
+    } else {
+      results <- list(Perf_AUC=NA,
+                      Perf_AUPRC=NA,
+                      Perf_PAUC=NA,
+                      Perf_Accuracy=NA,
+                      Curve_Sensitivity=NA,
+                      Curve_Specificity=NA,
+                      Curve_PPV=NA,
+                      Curve_NPV=NA,
+                      Perf_BalancedAccuracy=NA,
+                      Perf_F1score=NA,
+                      Curve_TPR=NA,
+                      Curve_FPR=NA,
+                      Curve_Thresholds=NA,
+                      Curve_Models=NA,
+                      N_outcomes=NA,
+                      N_controls=NA,
+                      N_total=NA)
+    }
+    return(results)
   } else if (length(unique(predictions)) == 1) {
     warning('No variation in predictions!')
   }
@@ -81,7 +102,7 @@ evaluateModel <- function(predictions, real, model=NULL) {
   # plot(roc)
   # plot(pr)
 
-  if (all(unique(predictions) %in% c(0,1))) { # Return for classes
+  if (class) { # Return for classes
     conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
     summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
 
@@ -105,8 +126,8 @@ evaluateModel <- function(predictions, real, model=NULL) {
                     Perf_F1score=F1_score,
                     Curve_TPR=paste(curve_TPR, collapse = "_"),
                     Curve_FPR=paste(curve_FPR, collapse = "_"),
-                    Curve_Models=ifelse(is.null(model), NA, model),
                     Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                    Curve_Models=ifelse(is.null(model), NA, model),
                     N_outcomes=N_outcomes,
                     N_controls=N_controls,
                     N_total=N_total)
@@ -288,6 +309,7 @@ lasso_cyclops <- function(x, y, model_lasso = NULL, return = "features") {
 
 }
 
+
 explore_AUCcurve <- function(train, data_path, test, data_name, output_path_curve = paste0(output_path, "/explore/AUC_curve"), models, i, o, explore_options, bound) {
 
   explore_options_curve <- explore_options[o,]
@@ -334,4 +356,94 @@ explore_AUCcurve <- function(train, data_path, test, data_name, output_path_curv
 
   return(list(curve_TPR, curve_FPR, curve_models, curve_thresholds, N_outcomes, N_controls, N_total,
               curve_sensitivity, curve_specificity, curve_PPV, curve_NPV))
+}
+
+
+exploreCurve <- function(models_AUCcurve, plpModel, data) {
+
+  # Convert to dense covariates
+  covariates <- as.data.frame(data$covariateData$covariates)
+  # covariates <- covariates[covariates$covariateId %in% plpModel$model$coefficients,] # COMMENTED OUT AS VARIABLES INCLUDED DIFFER PER MODEL BELOW!
+  denseData <- reshape2::dcast(covariates, rowId ~ covariateId, value.var = 'covariateValue', fill = 0)
+
+  cohort <- data$labels
+  labels <- cohort$outcomeCount
+
+  exploreData <- merge(cohort[c("rowId", "outcomeCount")], denseData, by = 'rowId', all.x = TRUE)
+  exploreData[is.na(exploreData)] <- 0
+  exploreData[c("rowId", "outcomeCount")] <- NULL
+
+  # Convert to same feature names as rule strings
+  # colnames(exploreData) <- paste0("'", colnames(exploreData), "'")
+
+  # Combine all these results
+  curve_TPR <- c(1,0)
+  curve_FPR <- c(1,0)
+  curve_models <- c(NA, NA)
+  # curve_thresholds <- c(-Inf, Inf)
+
+  curve_sensitivity <- c(0,1)
+  curve_specificity <- c(1,0)
+  curve_PPV <- c(0,1)
+  curve_NPV <- c(1,0)
+
+  for (c in length(models_AUCcurve):1) {
+    model <- models_AUCcurve[c]
+
+    # Predict using train and test
+    predict <- tryCatch(as.numeric(Explore::predictExplore(model = model, test_data = exploreData)))
+
+    eval_curve <- evaluateModel(predict, labels)
+
+    curve_TPR[c+2] <- eval_curve$Perf_Sensitivity
+    curve_FPR[c+2] <- 1- eval_curve$Perf_Specificity
+    curve_models[c+2] <- model
+    # curve_thresholds[c+2] <- eval_curve$Perf_PPV
+    curve_thresholds <- 0.5
+
+    N_outcomes <- eval_curve$N_outcomes
+    N_controls <- eval_curve$N_controls
+    N_total <- eval_curve$N_total
+
+    curve_sensitivity[c+2] <- eval_curve$Perf_Sensitivity
+    curve_specificity[c+2] <- eval_curve$Perf_Specificity
+    curve_PPV[c+2] <- eval_curve$Perf_PPV
+    curve_NPV[c+2] <- eval_curve$Perf_NPV
+  }
+
+  result <- list(Perf_AUC=NA,
+                 Perf_AUPRC=NA,
+                 Perf_PAUC=NA,
+                 Perf_Accuracy=NA, # add curve?
+                 Curve_Sensitivity=paste(curve_sensitivity, collapse = "_"),
+                 Curve_Specificity=paste(curve_specificity, collapse = "_"),
+                 Curve_PPV=paste(curve_PPV, collapse = "_"),
+                 Curve_NPV=paste(curve_NPV, collapse = "_"),
+                 Perf_BalancedAccuracy=NA, # add curve?
+                 Perf_F1score=NA, # add curve?
+                 Curve_TPR=paste(curve_TPR, collapse = "_"),
+                 Curve_FPR=paste(curve_FPR, collapse = "_"),
+                 Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                 Curve_Models=paste(curve_models, collapse = "_"),
+                 N_outcomes=paste(N_outcomes, collapse = "_"),
+                 N_controls=paste(N_controls, collapse = "_"),
+                 N_total=paste(N_total, collapse = "_"))
+
+  return(result)
+}
+
+loadTrainTestData <- function(file, readOnly = TRUE) {
+  if (!file.exists(file))
+    stop(paste("Cannot find folder", file))
+  if (!file.info(file)$isdir)
+    stop(paste("Not a folder", file))
+
+  result <- list(Train = list(covariateData = FeatureExtraction::loadCovariateData(file = file.path(file, "train-covariates")),
+                              labels = readRDS(file.path(file, "train-labels.rds")),
+                              folds = readRDS(file.path(file, "train-folds.rds"))),
+                 Test = list(covariateData = FeatureExtraction::loadCovariateData(file = file.path(file, "test-covariates")),
+                             labels = readRDS(file.path(file, "test-labels.rds"))))
+  attr(result$Train, "metaData") <- readRDS(file.path(file, "metadata.rds"))
+
+  return(result)
 }
