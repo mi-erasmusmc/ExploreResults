@@ -27,43 +27,6 @@ runCheckData <- function(data, d) {
 
 }
 
-
-summarizeData <- function(summary_data, data, d) {
-
-  # Number of outcomes
-  outcomes <- sum(data$class)
-
-  # Number of observations
-  observations <-  nrow(data)
-
-  # Outcome rate
-  rate <- outcomes * 100.0 / observations
-
-  # Number of features
-  num_features <- ncol(data) - 1
-
-  # Number of different values per feature
-  max_val_features <- max(sapply(data, function(c) length(unique(c))))
-  min_val_features <- min(sapply(data, function(c) length(unique(c))))
-
-  # Max range across features
-  min_val <- min(data)
-  max_val <- max(data)
-
-  summary_data <- rbind(summary_data, c(list("Data" = d,
-                                             "Outcomes" = outcomes,
-                                             "Observations" = observations,
-                                             "Outcome_rate" = rate,
-                                             "Number_of_features" = num_features),
-                                        "Max_different_values" = max_val_features,
-                                        "Min_different_values" = min_val_features,
-                                        "Min_val" = min_val,
-                                        "Max_val" =  max_val,
-                                        "Outcomes_resampling" = NA,
-                                        "Outcome_rate_resampling" = NA))
-  return(summary_data)
-}
-
 summarizeDataPLP <- function(summary_data, result, plp) {
 
   real_train <- result$prediction$outcomeCount[result$prediction$evaluationType == "Train"]
@@ -82,7 +45,7 @@ summarizeDataPLP <- function(summary_data, result, plp) {
   rate_test <- outcomes_train * 100.0 / observations_train
 
   # Number of features
-  num_features <- length(result$model$model$coefficients)
+  num_features <- nrow(result$model$covariateImportance)
 
   # Number of different values per feature
   max_val_features <- NA # max(sapply(data, function(c) length(unique(c))))
@@ -109,11 +72,3 @@ summarizeDataPLP <- function(summary_data, result, plp) {
   return(summary_data)
 }
 
-
-getPlpData <- function() {
-
-
-
-
-
-}
