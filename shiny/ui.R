@@ -28,24 +28,23 @@ ui <- dashboardPage(
       menuItem("About", tabName = "about"),
       menuItem("Data", tabName = "data"),
       menuItem("EXPLORE", tabName = "explore"),
-      addInfo(menuItem("Compare methods", tabName = "methods"), "methodsInfo"),
+      menuItem("Comparison tables", tabName = "tables"),
+      menuItem("Comparison figures", tabName = "methods"),
 
       # Input parameters
-      # -> "Test_Class", "Test_Prob", "Train_Class"
       selectInput("resultFolder", label = "Result Folder", choices = resultFolders,  selected = resultFolders[1]),
-      conditionalPanel(condition = "input.tabs=='explore'",
-                       htmlOutput("dynamic_comparisonExplore")
-      ),
-      conditionalPanel(condition = "input.tabs=='methods'",
-                       selectInput("performance", label = "Performance", choices = c("Train", "Test"),  selected = "Train")
-      ),
-      conditionalPanel(condition = "input.tabs=='methods'",
-                       selectInput("evaluate", label = "Evaluate", choices = c("Class", "Prob"),  selected = "Class")
-      ),
-      conditionalPanel(condition = "input.tabs=='methods'",
+      conditionalPanel(condition = "input.tabs=='tables' || input.tabs=='methods'",
                        htmlOutput("dynamic_modelMethods")
+      ),
+      conditionalPanel(condition = "input.tabs=='tables'",
+                       selectInput("selection", label = "Covariates", choices = list("All" = "_Full.csv", "Selected 50" = ".csv"), selected = "Selected 50")
+      ),
+      conditionalPanel(condition = "input.tabs=='methods'",
+                       selectInput("performance", label = "Performance", choices = c("Train", "Test"),  selected = "Test")
+      ),
+      conditionalPanel(condition = "input.tabs=='methods'",
+                       selectInput("evaluate", label = "Evaluate", choices = c("Class", "Prob"),  selected = "Prob")
       )
-
     )
   ),
   dashboardBody(
@@ -91,48 +90,45 @@ ui <- dashboardPage(
               tabsetPanel(
                 id = "",
                 tabPanel(
-                  "Summary table",
+                  "Settings and results",
                   br(),
                   textOutput("exploreOptionsTitle"),
                   br(),
                   dataTableOutput("exploreOptions")
                 ),
                 tabPanel(
-                  "Summary time",
+                  "Times",
                   br(),
                   textOutput("exploreOutputTitle"),
                   br(),
                   box(
-                    plotOutput("exploreOutputRuleLength")
+                    plotlyOutput("exploreOutputRuleLength")
                   ),
                   box(
-                    plotOutput("exploreOutputMaximize")
-                  )
-                ),
-                tabPanel(
-                  "Comparison time",
-                  br(),
-                  textOutput("exploreComparisonTitle"),
-                  br(),
-                  box(
-                    plotOutput("exploreComparison1")
-                  ),
-                  box(
-                    plotOutput("exploreComparison2")
+                    plotlyOutput("exploreOutputMaximize")
                   )
                 )
               )
       ),
-
-      tabItem(tabName = "methods",
+      tabItem(tabName = "tables",
               tabsetPanel(
                 id = "",
                 tabPanel(
-                  "Summary table",
+                  "Performance",
                   br(),
                   textOutput("comparisonTitle"),
                   dataTableOutput("comparisonTable")
                 ),
+                tabPanel(
+                  "Models",
+                  br(),
+                  dataTableOutput("modelTable")
+                )
+              )
+      ),
+      tabItem(tabName = "methods",
+              tabsetPanel(
+                id = "",
                 tabPanel(
                   "Summary metrics",
                   br(),
@@ -154,6 +150,12 @@ ui <- dashboardPage(
                   ),
                 ),
                 tabPanel(
+                  "Trade-off",
+                  br(),
+                  # textOutput("comparisonTitle"),
+                  plotlyOutput("tradeOff")
+                ),
+                tabPanel(
                   "AUC curves",
                   br(),
                   # textOutput("comparisonTitle"),
@@ -166,17 +168,17 @@ ui <- dashboardPage(
                   plotlyOutput("ptPlot")
                 ),
                 tabPanel(
+                  "PTP reversed",
+                  br(),
+                  # textOutput("comparisonTitle"),
+                  plotlyOutput("ptPlot_reversed")
+                ),
+                tabPanel(
                   "Net benefit",
                   br(),
                   # textOutput("comparisonTitle"),
                   plotlyOutput("nbPlot"),
                   dataTableOutput("nbTable")
-                ),
-                tabPanel(
-                  "Summary model",
-                  br(),
-                  # textOutput("comparisonTitle"),
-                  dataTableOutput("modelTable")
                 )
               )
 
