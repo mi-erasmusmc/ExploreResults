@@ -1,5 +1,7 @@
 library(PatientLevelPrediction)
 library(Explore)
+library(Eunomia)
+library(DatabaseConnector)
 library(RWeka)
 library(data.table)
 library(dplyr)
