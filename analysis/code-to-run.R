@@ -163,11 +163,11 @@ if (selection || train) {
     databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetails = connectionDetails,
                                                                      cdmDatabaseSchema = "cdm",
                                                                      cdmDatabaseId = "CDM-M-20220414",
-                                                                     cohortDatabaseSchema = "amarkustseinen",
+                                                                     cohortDatabaseSchema = "todo",
                                                                      cohortTable = cohortTable,
                                                                      targetId = cohortId,
                                                                      outcomeIds = outcomeId,
-                                                                     outcomeDatabaseSchema = "amarkustseinen",
+                                                                     outcomeDatabaseSchema = "todo",
                                                                      outcomeTable = cohortTable,
                                                                      cdmDatabaseName = "IPCI")
   }
