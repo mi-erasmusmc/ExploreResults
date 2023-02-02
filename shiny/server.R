@@ -28,7 +28,8 @@ server <- function(input, output, session) {
 
   # Dynamic input parameters
   output$dynamic_modelMethods = renderUI({
-    one <- selectInput("dataset", label = "Dataset", choices = unique(from_csv_explore_options()$Data), selected = unique(from_csv_explore_options()$Data)[1])
+    # one <- selectInput("dataset", label = "Dataset", choices = unique(from_csv_explore_options()$Data), selected = unique(from_csv_explore_options()$Data)[1])
+    one <- selectInput("dataset", label = "Dataset", choices = unique(from_csv_output_methods()$Data), selected = unique(from_csv_output_methods()$Data)[1])
 
     return(tagList(one))
   })
@@ -275,8 +276,8 @@ server <- function(input, output, session) {
       output <- output[grepl(tolower(unlist(strsplit(metric, "_"))[2]), tolower(sub("values_", "", output$variable))), ]
 
       figure <- ggplot(output, aes(values_threshold, value, group = combined_group, color = combined_group, text = paste("Model: ", values_models,
-                                                                                                         "<br>Threshold: ", round(values_threshold,2),
-                                                                                                         "<br>Value: ", round(value,2)))) +
+                                                                                                                         "<br>Threshold: ", round(values_threshold,2),
+                                                                                                                         "<br>Value: ", round(value,2)))) +
         geom_line() +
         geom_point() +
         labs(title = paste0("Performance ", strsplit(metric, "_")[[1]][2]), x = "Data", y = strsplit(metric, "_")[[1]][2]) +
@@ -328,23 +329,16 @@ server <- function(input, output, session) {
     fig_compare_metric(paste0("Perf_F1score_", input$performance, "_", input$evaluate))
   })
 
-  output$tradeOff <- renderPlotly({
-    output <- output_methods_metrics()
-
-    output$Size[output$Method != "EXPLORE"] <- gsub(" covariates", "", output$Model[output$Method != "EXPLORE"]) # all models except EXPLORE
-    output$Size[output$Method == "EXPLORE"] <- stringr::str_count(output$Model[output$Method == "EXPLORE"], "AND|OR") + 1 # EXPLORE
-    output$Size <- as.numeric(output$Size)
-
-    figure <- ggplot(output, aes(eval(parse(text=paste0("Perf_AUC_", input$performance, "_Prob"))), Size, color = Group, shape=Data, text = paste("Model: ", Group,
-                                                                                                                                                  "<br>Data: ", Data))) +
-      geom_point() +
-      theme_bw() + xlim(0.5, 1) + xlab(paste0("AUC ", input$performance))
-
-    ggplotly(figure, tooltip = "text")
-  })
-
   output$aucCurves <- renderPlotly({
     output <- output_methods_curve()
+
+    # Remove not reported models from figures
+    exclude <- c("DecisionTree_2_Full",
+                 "DecisionTree_3_Full",
+                 "IHT_5",
+                 "IHT_10")
+
+    output <- output[!(output$group %in% exclude),]
 
     output <- output[order(output$values_TPR, decreasing = FALSE),]
     output <- output[output$values_models != "model not available",]
@@ -353,14 +347,19 @@ server <- function(input, output, session) {
     # temp <- data.frame(group="explore_extra", values_TPR=c(1,0.8305, 0.7995, 0.6420, 0.3484,0), values_FPR=c(1,0.2696,0.2466,0.1415,0.0462,0))
     # output <- rbind(output, temp, fill=TRUE)
 
-    # To visualize different iterations: add output$iteration <- as.factor(output$iteration) + to figure linetype = "iterations"
+    # Color per method
+    output$method <- sapply(output$group, function(g) unlist(strsplit(g, split = "_"))[[1]])
+    output$color <- ifelse(output$method == "EXPLORE", "EXPLORE", "Other models")
+    group.colors <- c(`Other models` = "#C0C0C0", `EXPLORE` = "#C49A02")
+    output$color <- factor(output$color, levels=names(group.colors))
 
-    figure <- ggplot(output, aes(values_FPR, values_TPR, group = group, color = group, text = paste("Model: ", values_models,
-                                                                                                    "<br>TPR: ", round(values_FPR,2),
-                                                                                                    "<br>FPR: ", round(values_TPR,2)))) +
+    # To visualize different iterations: add output$iteration <- as.factor(output$iteration) + to figure linetype = "iterations"
+    figure <- ggplot(output, aes(values_FPR, values_TPR, group = group, color = color, text = paste("Model: ", values_models,
+                                                                                                     "<br>TPR: ", round(values_FPR,2),
+                                                                                                     "<br>FPR: ", round(values_TPR,2)))) +
       geom_line() +
-      geom_point() +
-      theme_bw()
+      # geom_point() +
+      theme_bw() + xlab("1 - Specificity") + ylab("Sensitivity") + scale_color_manual(values=group.colors)
 
     ggplotly(figure, tooltip = "text")
   })
@@ -432,6 +431,14 @@ server <- function(input, output, session) {
   output$nbPlot <- renderPlotly({
     result <- extractNetBenefit()
 
+    # Remove not reported models from figures
+    exclude <- c("DecisionTree_2_Full_1",
+                 "DecisionTree_3_Full_1",
+                 "IHT_5_1",
+                 "IHT_10_1")
+
+    result <- result[!(result$combined_group %in% exclude),]
+
     df2 <- tidyr::pivot_longer(
       data = result,
       cols = colnames(result)[!(colnames(result) %in% c('pt', 'combined_group'))],
@@ -439,8 +446,24 @@ server <- function(input, output, session) {
       values_to = 'value'
     )
 
+    # Keep only one treat all and treat none curve
+    df <- df2[df2$combined_group == "EXPLORE_3_1" | !(df2$variable %in%  c("treatAll", "treatNone")),]
+    df$combined_group[df$combined_group == "EXPLORE_3_1" & (df$variable %in% c("treatAll", "treatNone"))] <- "baseline"
+
+    # Color per method
+    df$group <- sapply(df$combined_group, function(g) unlist(strsplit(g, split = "_"))[[1]])
+
+    df$color <- ifelse(df$group == "EXPLORE", "EXPLORE", "Other models")
+    df$color[df$variable == "treatAll"] <- "Treat all"
+    df$color[df$variable == "treatNone"] <- "Treat none"
+
+    group.colors <- c(`Other models` = "#C0C0C0", `Treat all` ="#000000", `Treat none` = "#000000", `EXPLORE` = "#C49A02")
+    group.lines <- c(`Other models` = "solid", `Treat all` ="dotted", `Treat none` = "dashed", `EXPLORE` = "solid")
+
+    df$color <- factor(df$color, levels=names(group.colors))
+
     figure <- ggplot2::ggplot(
-      data = df2,
+      data = df,
       ggplot2::aes(
         x = .data$pt,
         y = .data$value
@@ -448,10 +471,13 @@ server <- function(input, output, session) {
     ) +
       ggplot2::geom_line( # position = position_dodge(width = 0.01),
         ggplot2::aes(
-          linetype = .data$variable,
-          color = .data$combined_group
+          linetype = .data$color,
+          group = .data$combined_group,
+          color = .data$color
         )
-      ) + ylim(-0.1, max(result[,c("netBenefit", "treatAll")])*1.2) + xlim(0,0.4)
+      ) + theme_bw(base_size =13) + ylim(-0.025, max(result[,c("netBenefit", "treatAll")])*1.3) +
+      xlim(0,0.4) + xlab("Risk threshold (p)") + ylab("Net benefit") + scale_color_manual(values=group.colors) +
+      scale_linetype_manual(values = group.lines)
 
     ggplotly(figure, tooltip = "text")
   })
@@ -523,7 +549,7 @@ server <- function(input, output, session) {
             output_select_m <- output_m
           }
 
-          pt <- 1 - c(seq(0.05,0.65,0.1), seq(0.75,0.97,0.02))
+          pt <- 1 - c(seq(0.05,0.65,0.1), seq(0.7,1,0.02))
           netbenefit_m <- data.frame()
 
           for (pt_m in pt) { # pt_m <- 0.2
@@ -573,6 +599,53 @@ server <- function(input, output, session) {
 
     return(netbenefit)
   })
+
+  # Overview figures
+  output$aucRanges <- renderPlotly({
+    output <- output_methods_metrics()
+
+    output$Size[output$Method != "EXPLORE"] <- gsub(" covariates", "", output$Model[output$Method != "EXPLORE"]) # all models except EXPLORE
+    output$Size[output$Method == "EXPLORE"] <- stringr::str_count(output$Model[output$Method == "EXPLORE"], "AND|OR") + 1 # EXPLORE
+    output$Size <- as.numeric(output$Size)
+
+    # Color per method
+    output$Method <- sapply(output$Group, function(g) unlist(strsplit(g, split = "_"))[[1]])
+
+    col <- paste0("Perf_AUC_", input$performance, "_Prob")
+    output$Show_Performance <- output[,..col]
+
+
+    figure <- ggplot(output, aes(Data, Show_Performance, color = Method, shape = Method, text = paste("Model: ", Group,
+                                                                                                      "<br>Value: ", Show_Performance))) +
+      geom_point() + ylim(0.5, 0.85) +
+      theme_bw() + ylab(paste0("AUC ", input$performance)) + theme(axis.text.x = element_text(angle = 90)) + xlab("")
+
+    ggplotly(figure, tooltip = "text")
+  })
+
+  output$tradeOff <- renderPlotly({
+    output <- output_methods_metrics()
+
+    output$Size[output$Method != "EXPLORE"] <- gsub(" covariates", "", output$Model[output$Method != "EXPLORE"]) # all models except EXPLORE
+    output$Size[output$Method == "EXPLORE"] <- stringr::str_count(output$Model[output$Method == "EXPLORE"], "AND|OR") + 1 # EXPLORE
+    output$Size <- as.numeric(output$Size)
+    output$Inverse_Size <- sapply(output$Size, function(i) { 1 / i})
+
+    col <- paste0("Perf_AUC_", input$performance, "_Prob")
+    output <- output[get(col) > 0.6]
+
+    output$Show_Performance <- output[,..col]
+
+    figure <- ggplot(output, aes(x=Show_Performance, y=Inverse_Size, group = Data, color = Data, text = paste("Model: ", Group,
+                                                                                                              "<br>Data: ", Data))) +
+      geom_point() +
+      # geom_smooth(method = "lm", se = FALSE) +
+      geom_smooth(method = "loess", span = 3, se = FALSE) +
+      theme_bw(base_size=15) + xlim(0.6, 0.95) + xlab(paste0("AUC ", input$performance)) + ylab("Interpretability (1 / Size)")
+
+    ggplotly(figure, tooltip = "text")
+  })
+
 
 }
 

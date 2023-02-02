@@ -3,23 +3,19 @@ library(Explore)
 library(RWeka)
 library(data.table)
 library(dplyr)
-# LINUX: reticulate::use_condaenv("reticulate3.8")
-# MAC: reticulate::use_condaenv("r-reticulate")
-# options(andromedatempdir = "J:/amarkus/Documents/R/Temp")
+reticulate::use_condaenv("todo")
 
 plp <- "Test"
-nVar <- 10
+nVar <- 20
 
-selection <- FALSE
-train <- FALSE
+selection <- TRUE
+train <- TRUE
 evaluate <- TRUE
-shiny <- FALSE
+shiny <- TRUE
 
 # Paths
 root <- getwd()
 outputFolder <- file.path(root, "shiny", "output", Sys.Date())
-# outputFolder <- file.path(root, "shiny", "output", "times_windows")
-# outputFolder <- file.path(root, "shiny", "output", "models_linux")
 
 if (!dir.exists(outputFolder)) {
   dir.create(outputFolder)
@@ -62,21 +58,19 @@ if (selection || train) {
     )
 
   } else {
-    # Get connection details
-    # TODO: sys.setenv / sys.getenv
     # Details for connecting to the server:
-    dbms <- 'postgresql'
-    user <- 'tseinen'
-    pw <- 'tseinen'
-    server <- 'Res-Srv-Lin-02/CDM-M-20220414'
-    port <- 5432
+    dbms <- 'todo'
+    user <- 'todo'
+    pw <- 'todo'
+    server <- 'todo'
+    port <-'todo'
 
     connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = dbms,
                                                                     server = server,
                                                                     user = user,
                                                                     password = pw,
                                                                     port = port)
-    cohortTable <- 'cohorts_22dec2022'
+    cohortTable <- 'todo'
 
     if (plp == "HospitalReadmission") {
       # Select cohorts
@@ -300,7 +294,6 @@ if (train) {
                                  stringsAsFactors = FALSE) # TODO: check what happens if no solution
   explore_options$Option <- 3:5
   write.csv(explore_options, file.path(outputFolder, "explore_options.csv"), row.names = FALSE)
-  # TODO: use explore_options as input, output correct option # in output (eg via i)?
 
   for (option in explore_options$Option) {
     analysisId <- paste0("EXPLORE_", plp, "_", option)
@@ -311,8 +304,8 @@ if (train) {
                                                         maximize = explore_options$Maximize[explore_options$Option == option],
                                                         accuracy = explore_options$Constraint_Accuracy[explore_options$Option == option],
                                                         parallel = explore_options$Parallel[explore_options$Option == option],
-                                                        aucCurve = TRUE, # OR: FALSE
-                                                        sort_by = explore_options$Sorted[explore_options$Option == option], # OR: none
+                                                        aucCurve = TRUE,
+                                                        sort_by = explore_options$Sorted[explore_options$Option == option],
                                                         saveDirectory = file.path(outputFolder, analysisId))
 
     list_models[[paste0("EXPLORE", option)]] <- list(analysisId=analysisId,
@@ -393,7 +386,7 @@ if (evaluate) {
 
   datasets <- unique(sapply(outputList, function(l) unlist(strsplit(l, split = "_"))[[2]]))
 
-  for (plp in datasets) { # plp = datasets[1] # plp = "HeartfailureStroke"
+  for (plp in datasets) {
     # Select results for current dataset
     outputList_d <- outputList[grepl(plp, outputList)]
 
@@ -419,7 +412,6 @@ if (evaluate) {
       }
 
       # Save objects
-      # features <- result$model$covariateImportance$covariateId
       features <- result$model$model$coefficients$covariateIds
       features <- features[features!='(Intercept)']
       models <- setNames(data.table(matrix(0, nrow = 0, ncol = length(features)+4)), c("method", "iteration", "option", features, "model size")) # NO INTERCEPT
@@ -431,19 +423,18 @@ if (evaluate) {
         i <- unlist(strsplit(o, split = "_"))[3]
 
         result <- PatientLevelPrediction::loadPlpResult(file.path(outputFolder, o, "plpResult"))
-        # TODO: add check when no model fitted (skip the remaining code)
 
         # Save computation time method
         time <- result$model$trainDetails$trainingTime
 
         # Save model
         if (method == "LASSO" || method == "IHT") {
-          varImp <- result$model$model$coefficients # result$model$covariateImportance
+          varImp <- result$model$model$coefficients
           vars <- varImp$betas[varImp$covariateIds!='(Intercept)']
           names(vars) <- as.double(varImp$covariateIds[varImp$covariateIds!='(Intercept)'])
           size <- sum(sapply(vars, function(v) ifelse(v != 0, 1, 0)))
         } else if (method == "RandomForest" || method == "DecisionTree") {
-          varImp <- result$model$covariateImportance # result$model$model$coefficients
+          varImp <- result$model$covariateImportance
           vars <- varImp$covariateValue
           names(vars) <- varImp$covariateId
           size <- sum(sapply(vars, function(v) ifelse(v != 0, 1, 0)))
@@ -453,26 +444,19 @@ if (evaluate) {
           names(vars) <- varImp$covariateId
           size <- sum(varImp$covariateValue)
         } else if (method == "XGBoost") {
-          varImp <- result$model$covariateImportance # result$model$model$coefficients
+          varImp <- result$model$covariateImportance
           varImp <- varImp %>% group_by(covariateId) %>% summarise(included=max(included)) # Variables can occur twice in computed var importance
           vars <- varImp$included
           names(vars) <- varImp$covariateId
           size <- sum(varImp$included)
         } else {
           stop('Model not included')
-          # TODO: check for all algorithms of interest
-          # count_vars <- randomForest::varUsed(model_randomforest, by.tree = FALSE, count = TRUE)
-          # names(count_vars) <- colnames(train)[1:(ncol(train)-1)]
-          # vars <- lapply(colnames(models)[3:(ncol(models)-1)], function(c) ifelse(c %in% names(count_vars), count_vars[c], NA))
-          # model <- c(list(method, i), as.list(vars), sum(sapply(vars, function(v) ifelse(v > 0, 1, 0)), na.rm = TRUE))
         }
 
-        # TODO: remove variables excluded by unvariate analysis
         model <- c(method=method, iteration=1, option=i, as.list(vars), `model size`=size)
         models <- rbind(models, model)
 
         # Evaluate predictions
-        # TODO: check/add CV?
         real_train <- result$prediction$outcomeCount[result$prediction$evaluationType == "Train"]
         predictions_train <- result$prediction$value[result$prediction$evaluationType == "Train"]
 

@@ -30,16 +30,17 @@ ui <- dashboardPage(
       menuItem("EXPLORE", tabName = "explore"),
       menuItem("Comparison tables", tabName = "tables"),
       menuItem("Comparison figures", tabName = "methods"),
+      menuItem("Overview figures ", tabName = "overview"),
 
       # Input parameters
       selectInput("resultFolder", label = "Result Folder", choices = resultFolders,  selected = resultFolders[1]),
-      conditionalPanel(condition = "input.tabs=='tables' || input.tabs=='methods'",
+      conditionalPanel(condition = "input.tabs=='tables' || input.tabs=='methods'|| input.tabs=='overview'",
                        htmlOutput("dynamic_modelMethods")
       ),
       conditionalPanel(condition = "input.tabs=='tables'",
                        selectInput("selection", label = "Covariates", choices = list("All" = "_Full.csv", "Selected 50" = ".csv"), selected = "Selected 50")
       ),
-      conditionalPanel(condition = "input.tabs=='methods'",
+      conditionalPanel(condition = "input.tabs=='methods' || input.tabs=='overview'",
                        selectInput("performance", label = "Performance", choices = c("Train", "Test"),  selected = "Test")
       ),
       conditionalPanel(condition = "input.tabs=='methods'",
@@ -150,12 +151,6 @@ ui <- dashboardPage(
                   ),
                 ),
                 tabPanel(
-                  "Trade-off",
-                  br(),
-                  # textOutput("comparisonTitle"),
-                  plotlyOutput("tradeOff")
-                ),
-                tabPanel(
                   "AUC curves",
                   br(),
                   # textOutput("comparisonTitle"),
@@ -178,10 +173,25 @@ ui <- dashboardPage(
                   br(),
                   # textOutput("comparisonTitle"),
                   plotlyOutput("nbPlot"),
-                  dataTableOutput("nbTable")
+                  # dataTableOutput("nbTable")
                 )
               )
 
+      ),
+      tabItem(tabName = "overview",
+              tabsetPanel(
+                id = "",
+                tabPanel(
+                  "AUC ranges",
+                  br(),
+                  plotlyOutput("aucRanges")
+                ),
+                tabPanel(
+                  "Trade-off",
+                  br(),
+                  plotlyOutput("tradeOff")
+                )
+              )
       )
     )
   )
