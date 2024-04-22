@@ -26,7 +26,8 @@ ui <- dashboardPage(
 
       # Tabs (some with additional information)
       menuItem("About", tabName = "about"),
-      menuItem("Data", tabName = "data"),
+      menuItem("PLP tasks", tabName = "tasks"),
+      menuItem("Covariate data", tabName = "covariates"),
       menuItem("EXPLORE", tabName = "explore"),
       menuItem("Comparison tables", tabName = "tables"),
       menuItem("Comparison figures", tabName = "methods"),
@@ -34,11 +35,11 @@ ui <- dashboardPage(
 
       # Input parameters
       selectInput("resultFolder", label = "Result Folder", choices = resultFolders,  selected = resultFolders[1]),
-      conditionalPanel(condition = "input.tabs=='tables' || input.tabs=='methods'|| input.tabs=='overview'",
-                       htmlOutput("dynamic_modelMethods")
+      conditionalPanel(condition = "input.tabs=='tables' ||input.tabs=='covariates' || input.tabs=='methods'",
+                       htmlOutput("dynamic_datasets")
       ),
-      conditionalPanel(condition = "input.tabs=='tables'",
-                       selectInput("selection", label = "Covariates", choices = list("All" = "_Full.csv", "Selected 50" = ".csv"), selected = "Selected 50")
+      conditionalPanel(condition = "input.tabs=='tasks'|| input.tabs=='tables' || input.tabs=='covariates' || input.tabs=='methods'",
+                       htmlOutput("dynamic_covariates")
       ),
       conditionalPanel(condition = "input.tabs=='methods' || input.tabs=='overview'",
                        selectInput("performance", label = "Performance", choices = c("Train", "Test"),  selected = "Test")
@@ -80,13 +81,19 @@ ui <- dashboardPage(
         # p("...")
       ),
 
-      tabItem(tabName = "data",
+      tabItem(tabName = "tasks",
               box(width = 12,
-                  textOutput("dataTableTitle"),
-                  dataTableOutput("dataTable")
+                  textOutput("tasksTableTitle"),
+                  dataTableOutput("tasksTable")
               )
       ),
 
+      tabItem(tabName = "covariates",
+              box(width = 12,
+                  textOutput("covariatesTableTitle"),
+                  dataTableOutput("covariatesTable")
+              )
+      ),
       tabItem(tabName = "explore",
               tabsetPanel(
                 id = "",

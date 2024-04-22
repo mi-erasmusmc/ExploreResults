@@ -27,20 +27,22 @@ server <- function(input, output, session) {
   })
 
   # Dynamic input parameters
-  output$dynamic_modelMethods = renderUI({
-    # one <- selectInput("dataset", label = "Dataset", choices = unique(from_csv_explore_options()$Data), selected = unique(from_csv_explore_options()$Data)[1])
+  output$dynamic_datasets = renderUI({
     one <- selectInput("dataset", label = "Dataset", choices = unique(from_csv_output_methods()$Data), selected = unique(from_csv_output_methods()$Data)[1])
 
     return(tagList(one))
   })
 
+  output$dynamic_covariates = renderUI({
+    two <- selectInput("covariates", label = "Covariates", choices = unique(from_csv_output_methods()$Covariates), selected = unique(from_csv_output_methods()$Covariates)[1])
+
+    return(tagList(two))
+  })
+
   # Load files
   from_csv_output_methods <- reactive({
-    input_data <- read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))
-    if (!("Selection" %in% colnames(input_data))) {
-      input_data$Selection <- TRUE
-    }
-    input_data$Selection_file <- ifelse(input_data$Selection, "", "_Full")
+    # input_data <- read.csv(file.path(outputFolder, input$resultFolder, "output_methods.csv"))
+    input_data <- read.csv(file.path(outputFolder, input$resultFolder, paste0("output_methods.csv")))
 
     return(input_data)
   })
@@ -66,29 +68,38 @@ server <- function(input, output, session) {
     return(explore_options)
   })
 
-
   from_csv_models <- reactive({
-    input_data <- read.csv(file.path(outputFolder, input$resultFolder, paste0("models_", input$dataset, input$selection)))
-
-    input_data$selection_file <- gsub(".csv", "", input$selection)
+    input_data <- read.csv(file.path(outputFolder, input$resultFolder, paste0("models_", input$dataset, "_", input$covariates, ".csv")))
 
     colnames(input_data) <- gsub("X", "", colnames(input_data))
-    row.names(input_data) <- paste0(input_data$method, "_", input_data$option, input_data$selection_file, "_", input_data$iteration)
+    row.names(input_data) <- paste0(input_data$method, "_", input_data$option, "_", input_data$iteration)
 
-    input_data[,c("method", "option", "iteration", "selection_file")] <- NULL
+    input_data[,c("method", "option", "iteration")] <- NULL
 
     return(input_data)
   })
 
   # Data tab
-  output$dataTableTitle <- renderText({
-    paste0("Information about datasets included in output ", names(which(resultFolders == input$resultFolder)))
+  output$tasksTableTitle <- renderText({
+    paste0("Information about prediction tasks included in output ", names(which(resultFolders == input$resultFolder)))
   })
 
-  output$dataTable <- renderDataTable({
-    summary_data <- read.csv(file.path(outputFolder, input$resultFolder, "summary_data.csv"), row.names = 1)
-    table <- t(summary_data)
+  output$tasksTable <- renderDataTable({
+    summary_tasks <- read.csv(file.path(outputFolder, input$resultFolder, paste0("summary_tasks_",  input$covariates, ".csv")), row.names = 1)
+    table <- t(summary_tasks)
     table <- round_df(table, 2)
+    return(table)
+  }, options = list(pageLength = 15, scrollX = TRUE))
+
+  # Covariates tab
+  output$covariatesTableTitle <- renderText({
+    paste0("Information about covariates included " , input$covariates, " in output ", names(which(resultFolders == input$resultFolder)))
+  })
+
+  output$covariatesTable <- renderDataTable({
+    covariates <- read.csv(file.path(outputFolder, input$resultFolder, paste0("covariates_", input$dataset, "_", input$covariates, ".csv")))
+    table <- round_df(covariates, 2)
+
     return(table)
   }, options = list(pageLength = 15, scrollX = TRUE))
 
@@ -146,14 +157,13 @@ server <- function(input, output, session) {
     data <- data[,!(colnames(data) %like% "Curve_|N_|Time")]
 
     # Aggregate over iterations
-    cols_group <- c("Data", "Selection", "Method", "Option", "Model", "Selection_file")
+    cols_group <- c("Data", "Covariates", "Method", "Option", "Model")
     cols_other <- colnames(data)[!colnames(data) %in% c(cols_group, "Iteration")]
 
     data <- data.table(data)
     data <- data[,lapply(.SD, mean), .SDcols = cols_other, by = cols_group]
 
-    data$Group <- paste0(data$Method, "_", data$Option, data$Selection_file)
-    data$Selection_file <- NULL
+    data$Group <- paste0(data$Method, "_", data$Option, "_", data$Covariates)
 
     return(data)
   })
@@ -162,7 +172,7 @@ server <- function(input, output, session) {
     table <- t(output_methods_metrics())
     colnames(table) <- table["Group",]
     table <- table[,table["Data",] == input$dataset]
-    table <- table[-c(1:4, 38),]
+    table <- table[-c(1:4, 32),]
 
     return(table)
   }, options = list(pageLength=50, scrollX = TRUE))
@@ -196,7 +206,7 @@ server <- function(input, output, session) {
       plot_data <- plot_data[plot_data$Data == dataset, !grepl("Perf_", colnames(plot_data)) & !grepl("_Test", colnames(plot_data)) & !grepl("_Train_Class", colnames(plot_data))]
     }
 
-    plot_data$Group <- paste0(plot_data$Method, "_", plot_data$Option, plot_data$Selection_file)
+    plot_data$Group <- paste0(plot_data$Method, "_", plot_data$Option, "_", plot_data$Covariates)
 
     colnames(plot_data) <- stringr::str_replace(colnames(plot_data), paste0("_", performance, "_", evaluate), "")
 
@@ -212,7 +222,7 @@ server <- function(input, output, session) {
       }
 
       if (!is.na(plot_data$Curve_Thresholds[row])) {
-        values_threshold <- as.numeric(strsplit(plot_data$Curve_Thresholds[row], split = "_")[[1]])
+        values_threshold <- as.numeric(strsplit(as.character(plot_data$Curve_Thresholds[row]), split = "_")[[1]])
       } else {
         values_threshold <- NA
       }
@@ -333,16 +343,17 @@ server <- function(input, output, session) {
     output <- output_methods_curve()
 
     # Remove not reported models from figures
-    exclude <- c("DecisionTree_2_Full",
-                 "DecisionTree_3_Full",
-                 "IHT_5",
-                 "IHT_10")
+    exclude <- c()
+    # exclude <- c("DecisionTree_2_Full",
+    #              "DecisionTree_3_Full",
+    #              "IHT_5",
+    #              "IHT_10")
 
     output <- output[!(output$group %in% exclude),]
 
     output <- output[order(output$values_TPR, decreasing = FALSE),]
     output <- output[output$values_models != "model not available",]
-    # result can be non-monotonically increasing for test set
+    # Result can be non-monotonically increasing for test set
 
     # temp <- data.frame(group="explore_extra", values_TPR=c(1,0.8305, 0.7995, 0.6420, 0.3484,0), values_FPR=c(1,0.2696,0.2466,0.1415,0.0462,0))
     # output <- rbind(output, temp, fill=TRUE)
@@ -377,7 +388,7 @@ server <- function(input, output, session) {
 
     output <- melt(output, id.vars = c("combined_group", "group", "values_models", "values_threshold", "unique_id"))
     output <- output[order(output$values_threshold, decreasing = FALSE),]
-    # result can be non-monotonically increasing for test set
+    # Result can be non-monotonically increasing for test set
 
     return(output)
   })
@@ -432,10 +443,11 @@ server <- function(input, output, session) {
     result <- extractNetBenefit()
 
     # Remove not reported models from figures
-    exclude <- c("DecisionTree_2_Full_1",
-                 "DecisionTree_3_Full_1",
-                 "IHT_5_1",
-                 "IHT_10_1")
+    exclude <- c()
+    # exclude <- c("DecisionTree_2_Full_1",
+    #              "DecisionTree_3_Full_1",
+    #              "IHT_5_1",
+    #              "IHT_10_1")
 
     result <- result[!(result$combined_group %in% exclude),]
 
