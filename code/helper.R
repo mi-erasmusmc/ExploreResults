@@ -75,32 +75,6 @@ evaluateModel <- function(predictions, real, model=NULL, class=T) {
     warning('No variation in predictions!')
   }
 
-  roc <- pROC::roc(real, predictions, levels = c("0", "1"), direction = "<")
-
-  curve_TPR <- roc$sensitivities
-  curve_FPR <- 1 - roc$specificities
-  curve_thresholds <- roc$thresholds
-
-  if (length(curve_thresholds) > 20) {
-    indexes <- round(seq(from=1,to=length(curve_thresholds),length.out = 20))
-
-    curve_TPR <- curve_TPR[indexes]
-    curve_FPR <- curve_FPR[indexes]
-    curve_thresholds <- curve_thresholds[indexes]
-  }
-
-  N_outcomes <- length(roc$cases)
-  N_controls <- length(roc$controls)
-  N_total <- N_outcomes + N_controls
-
-  partial_auc <- pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<")
-
-  pr <- NA
-  try(pr <- PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, silent = TRUE)
-
-  # plot(roc)
-  # plot(pr)
-
   if (class) { # Return for classes
     conf_matrix <- table(factor(predictions, levels = c(0,1)), factor(real, levels = c(0,1))) # binary prediction
     summary_performance <- caret::confusionMatrix(conf_matrix, positive = '1')
@@ -113,9 +87,12 @@ evaluateModel <- function(predictions, real, model=NULL, class=T) {
     balanced_accuracy <- summary_performance$byClass['Balanced Accuracy']
     F1_score <- summary_performance$byClass['F1']
 
+    curve_TPR <- c(1.0, sensitivity, 0)
+    curve_FPR <- c(1.0, 1-specificity, 0)
+
     results <- list(Perf_AUC=pracma::trapz(curve_FPR[length(curve_FPR):1],curve_TPR[length(curve_TPR):1]), # roc$auc,
-                    Perf_AUPRC=pr,
-                    Perf_PAUC=partial_auc,
+                    Perf_AUPRC=tryCatch(PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, error=function(err) NA), # to catch exception when only outcomes or non-outcomes
+                    Perf_PAUC=pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<"),
                     Perf_Accuracy=accuracy,
                     Perf_Sensitivity=sensitivity,
                     Perf_Specificity=specificity,
@@ -125,47 +102,69 @@ evaluateModel <- function(predictions, real, model=NULL, class=T) {
                     Perf_F1score=F1_score,
                     Curve_TPR=paste(curve_TPR, collapse = "_"),
                     Curve_FPR=paste(curve_FPR, collapse = "_"),
-                    Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
+                    Curve_Thresholds=paste(c(-Inf, 0.5, Inf), collapse = "_"),
                     Curve_Models=ifelse(is.null(model), NA, model),
-                    N_outcomes=N_outcomes,
-                    N_controls=N_controls,
-                    N_total=N_total)
+                    N_outcomes=sum(real == 1),
+                    N_controls=sum(real == 0),
+                    N_total=length(real))
 
   } else { # Return for probabilities
 
-    curve_sensitivity <- c()
-    curve_specificity <- c()
+    roc <- pROC::roc(real, predictions, levels = c("0", "1"), direction = "<")
+
+    curve_sensitivity <- roc$sensitivities
+    curve_specificity <- roc$specificities
+    curve_TPR <- curve_sensitivity
+    curve_FPR <- 1 - curve_specificity
+    curve_thresholds <- roc$thresholds
+
+    # Reduce number of thresholds
+    if (length(curve_thresholds) > 20) {
+      indexes <- round(seq(from=1,to=length(curve_thresholds),length.out = 20))
+
+      curve_TPR <- curve_TPR[indexes]
+      curve_FPR <- curve_FPR[indexes]
+      curve_sensitivity <- curve_sensitivity[indexes]
+      curve_specificity <- curve_specificity[indexes]
+      curve_thresholds <- curve_thresholds[indexes]
+    }
+
+    # For each threshold compute other statistics (not automatically included in above functionality)
+    curve_Accuracy <- c()
     curve_PPV <- c()
     curve_NPV <- c()
+    curve_BalancedAccuracy <- c()
+    curve_F1score <- c()
 
     for (c in 1:length(curve_thresholds)) {
 
       pred_class_c <- as.numeric(ifelse(predictions >= curve_thresholds[[c]], 1, 0))
       eval <- evaluateModel(pred_class_c, real)
 
-      curve_sensitivity[c] <- eval$Perf_Sensitivity
-      curve_specificity[c] <- eval$Perf_Specificity
+      curve_Accuracy[c] <- eval$Perf_Accuracy
       curve_PPV[c] <- eval$Perf_PPV
       curve_NPV[c] <- eval$Perf_NPV
+      curve_BalancedAccuracy[c] <- eval$Perf_BalancedAccuracy
+      curve_F1score[c] <- eval$Perf_F1score
     }
 
     results <- list(Perf_AUC= pracma::trapz(curve_FPR[length(curve_FPR):1],curve_TPR[length(curve_TPR):1]), # roc$auc,
-                    Perf_AUPRC=pr,
-                    Perf_PAUC=partial_auc,
-                    Perf_Accuracy=NA, # add curve?
+                    Perf_AUPRC=tryCatch(PRROC::pr.curve(scores.class0 = predictions[real == 1], scores.class1 = predictions[real == 0], curve = TRUE)$auc.integral, error=function(err) NA),# to catch exception when only outcomes or non-outcomes
+                    Perf_PAUC=pROC::auc(real, predictions, partial.auc = c(1,0.8), partial.auc.focus = "sensitivity", partial.auc.correct=TRUE, levels = c("0", "1"), direction = "<"),
+                    Curve_Accuracy=paste(curve_Accuracy, collapse = "_"),
                     Curve_Sensitivity=paste(curve_sensitivity, collapse = "_"),
                     Curve_Specificity=paste(curve_specificity, collapse = "_"),
                     Curve_PPV=paste(curve_PPV, collapse = "_"),
                     Curve_NPV=paste(curve_NPV, collapse = "_"),
-                    Perf_BalancedAccuracy=NA, # add curve?
-                    Perf_F1score=NA, # add curve?
+                    Curve_BalancedAccuracy=paste(curve_BalancedAccuracy, collapse = "_"),
+                    Curve_F1score=paste(curve_F1score, collapse = "_"),
                     Curve_TPR=paste(curve_TPR, collapse = "_"),
                     Curve_FPR=paste(curve_FPR, collapse = "_"),
                     Curve_Thresholds=paste(curve_thresholds, collapse = "_"),
                     Curve_Models=ifelse(is.null(model), NA, model),
-                    N_outcomes=N_outcomes,
-                    N_controls=N_controls,
-                    N_total=N_total)
+                    N_outcomes=sum(real == 1),
+                    N_controls=sum(real == 0),
+                    N_total=length(real))
   }
 
   return(results)
@@ -225,20 +224,20 @@ prob_to_class <- function(predictions, real, optimise_class = "AUC") {
 
 }
 
+# This is the extended verison of Explore::rocCurveExplore()
+evaluateExplore <- function(modelsCurve, plpModel, data) {
 
-exploreCurve <- function(models_AUCcurve, plpModel, data) {
-
-  if (is.null(models_AUCcurve)) {
+  if (is.null(modelsCurve)) {
     results <- list(Perf_AUC=NA,
                     Perf_AUPRC=NA,
                     Perf_PAUC=NA,
-                    Perf_Accuracy=NA,
-                    Perf_Sensitivity=NA,
-                    Perf_Specificity=NA,
-                    Perf_PPV=NA,
-                    Perf_NPV=NA,
-                    Perf_BalancedAccuracy=NA,
-                    Perf_F1score=NA,
+                    Curve_Accuracy=NA,
+                    Curve_Sensitivity=NA,
+                    Curve_Specificity=NA,
+                    Curve_PPV=NA,
+                    Curve_NPV=NA,
+                    Curve_BalancedAccuracy=NA,
+                    Curve_F1score=NA,
                     Curve_TPR=NA,
                     Curve_FPR=NA,
                     Curve_Thresholds=NA,
@@ -270,45 +269,52 @@ exploreCurve <- function(models_AUCcurve, plpModel, data) {
   curve_models <- c(NA, NA)
   # curve_thresholds <- c(-Inf, Inf)
 
+  curve_Accuracy <- c(0,0) # TODO: check edge cases related to outcomes vs non-outcomes!
   curve_sensitivity <- c(0,1)
   curve_specificity <- c(1,0)
   curve_PPV <- c(0,1)
   curve_NPV <- c(1,0)
+  curve_BalancedAccuracy <- c(0,0) # TODO: check edge cases related to outcomes vs non-outcomes!
+  curve_F1score <- c(0,0) # TODO: check edge cases related to outcomes vs non-outcomes!
 
-  for (c in length(models_AUCcurve):1) {
-    model <- models_AUCcurve[c]
+  for (c in length(modelsCurve):1) {
+    model <- modelsCurve[c]
 
     # Predict using train and test
     predict <- tryCatch(as.numeric(Explore::predictExplore(model = model, test_data = exploreData)))
 
+    # Compute metrics
     eval_curve <- evaluateModel(predict, labels)
 
     curve_TPR[c+2] <- eval_curve$Perf_Sensitivity
     curve_FPR[c+2] <- 1- eval_curve$Perf_Specificity
     curve_models[c+2] <- model
-    # curve_thresholds[c+2] <- eval_curve$Perf_PPV
     curve_thresholds <- 0.5
 
     N_outcomes <- eval_curve$N_outcomes
     N_controls <- eval_curve$N_controls
     N_total <- eval_curve$N_total
 
+    curve_Accuracy[c+2] <- eval_curve$Perf_Accuracy
     curve_sensitivity[c+2] <- eval_curve$Perf_Sensitivity
     curve_specificity[c+2] <- eval_curve$Perf_Specificity
     curve_PPV[c+2] <- eval_curve$Perf_PPV
     curve_NPV[c+2] <- eval_curve$Perf_NPV
+    curve_BalancedAccuracy[c+2] <- eval_curve$Perf_BalancedAccuracy
+    curve_F1score[c+2] <- eval_curve$Perf_F1score
   }
 
+  # Output
   result <- list(Perf_AUC=pracma::trapz(curve_FPR[length(curve_FPR):1],curve_TPR[length(curve_TPR):1]),
                  Perf_AUPRC=NA,
                  Perf_PAUC=NA,
-                 Perf_Accuracy=NA, # add curve?
+                 Curve_Accuracy=paste(curve_Accuracy, collapse = "_"),
                  Curve_Sensitivity=paste(curve_sensitivity, collapse = "_"),
                  Curve_Specificity=paste(curve_specificity, collapse = "_"),
                  Curve_PPV=paste(curve_PPV, collapse = "_"),
                  Curve_NPV=paste(curve_NPV, collapse = "_"),
-                 Perf_BalancedAccuracy=NA, # add curve?
-                 Perf_F1score=NA, # add curve?
+                 Curve_BalancedAccuracy=paste(curve_BalancedAccuracy, collapse = "_"),
+                 Curve_F1score=paste(curve_F1score, collapse = "_"),
                  Curve_TPR=paste(curve_TPR, collapse = "_"),
                  Curve_FPR=paste(curve_FPR, collapse = "_"),
                  Curve_Thresholds=paste(curve_thresholds, collapse = "_"),

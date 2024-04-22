@@ -1,33 +1,41 @@
+# remotes::install_github("mi-erasmusmc/patientlevelprediction@explore")
 library(PatientLevelPrediction)
+
+# remotes::install_github("mi-erasmusmc/explore@main")
 library(Explore)
+
 library(Eunomia)
 library(DatabaseConnector)
 library(RWeka)
+library(CohortGenerator)
 library(data.table)
 library(dplyr)
-reticulate::use_condaenv("todo")
+library(caret)
+library(pracma)
+
+# reticulate::use_condaenv("reticulate3.8") # IPCI server
+# reticulate::use_condaenv("Explore") # Local laptop
 
 plp <- "Test"
-nVar <- 20
+plptasks <- c("HospitalReadmission", "COPDMortality", "EoLConversation", "HeartfailureStroke", "AsthmaExacerbation")
+covariates <- "Phenotypes" # "Default", "AgeSex", "Full", "Phenotypes"
 
+cohorts <- FALSE
 selection <- TRUE
 train <- TRUE
-evaluate <- TRUE
-shiny <- TRUE
 
 # Paths
 root <- getwd()
-outputFolder <- file.path(root, "shiny", "output", Sys.Date())
+# outputFolder <- file.path(root, "shiny", "output", Sys.Date())
+outputFolder <- file.path(root, "shiny", "output", "2023-04-05")
 
 if (!dir.exists(outputFolder)) {
-  dir.create(outputFolder)
+  dir.create(outputFolder, recursive = TRUE)
 }
 
-### Prediction tasks ###
+for (plp in plptasks) {
 
-if (selection || train) {
-
-
+  ### Specification prediction tasks ###
   if (plp == "Test") {
     # Get connection details
     connectionDetails <- Eunomia::getEunomiaConnectionDetails()
@@ -61,18 +69,19 @@ if (selection || train) {
 
   } else {
     # Details for connecting to the server:
-    dbms <- 'todo'
-    user <- 'todo'
-    pw <- 'todo'
-    server <- 'todo'
-    port <-'todo'
+    dbms <- 'postgresql'
+    user <- 'amarkus'
+    pw <- 'amarkus'
+    server <- 'Res-Srv-Lin-02/CDM-O-20230321'
+    port <- 5432
 
     connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = dbms,
                                                                     server = server,
                                                                     user = user,
                                                                     password = pw,
                                                                     port = port)
-    cohortTable <- 'todo'
+    cohortTable <- 'cohorts_explore'
+    baseUrl <- 'http://res-srv-lin-02:8080/WebAPI'
 
     if (plp == "HospitalReadmission") {
       # Select cohorts
@@ -160,343 +169,319 @@ if (selection || train) {
 
     }
 
+    cdmDatabaseSchema = 'cdm'
+    cohortDatabaseSchema = 'amarkus'
+
     databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetails = connectionDetails,
-                                                                     cdmDatabaseSchema = "cdm",
-                                                                     cdmDatabaseId = "CDM-M-20220414",
-                                                                     cohortDatabaseSchema = "todo",
+                                                                     cdmDatabaseSchema = cdmDatabaseSchema,
+                                                                     cdmDatabaseId = "CDM-O-20230321",
+                                                                     cohortDatabaseSchema = cohortDatabaseSchema,
                                                                      cohortTable = cohortTable,
                                                                      targetId = cohortId,
                                                                      outcomeIds = outcomeId,
-                                                                     outcomeDatabaseSchema = "todo",
+                                                                     outcomeDatabaseSchema = cohortDatabaseSchema,
                                                                      outcomeTable = cohortTable,
                                                                      cdmDatabaseName = "IPCI")
+
   }
 
-  # Possible covariates
-  covariateSettingList_default <- FeatureExtraction::createDefaultCovariateSettings()
-  covariateSettingList_agesex <- FeatureExtraction::createCovariateSettings(useDemographicsGender = T, useDemographicsAgeGroup = T)
-  covariateSettingList <- FeatureExtraction::createCovariateSettings(useDemographicsGender = T, useDemographicsAgeGroup = T,
-                                                                     useConditionGroupEraAnyTimePrior = T, useConditionGroupEraLongTerm = T,
-                                                                     useConditionGroupEraShortTerm = T, useDrugGroupEraLongTerm = T,
-                                                                     useDrugGroupEraShortTerm = T, useDrugGroupEraOverlapping = T)
+  ### Generate cohorts ###
+  if (cohorts) {
+    cohorts_study = TRUE
+    cohorts_phenotypes = TRUE
 
-  # Selected covariates
-  plpData <- PatientLevelPrediction::getPlpData(
-    databaseDetails = databaseDetails,
-    restrictPlpDataSettings = createRestrictPlpDataSettings(),
-    covariateSettings = covariateSettingList
-  )
-}
+    # Create cohort tables
+    cohortTableNames <- CohortGenerator::getCohortTableNames(cohortTable = cohortTable)
 
-### Pre-process data ###
-if (selection) {
-  # Get full dataset
-  modelSettings <- PatientLevelPrediction::setLassoLogisticRegression(variance=0.01)
+    CohortGenerator::createCohortTables(connectionDetails = connectionDetails,
+                                        cohortDatabaseSchema = cohortDatabaseSchema,
+                                        cohortTableNames = cohortTableNames,
+                                        incremental = TRUE)
 
-  plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
-                                               outcomeId = outcomeId,
-                                               modelSettings = modelSettings,
-                                               analysisId = paste0("Full_", plp),
-                                               analysisName = paste0("No selection"),
-                                               populationSettings = populationSettings,
-                                               splitSettings = createDefaultSplitSetting(),
-                                               sampleSettings = createSampleSettings(),
-                                               featureEngineeringSettings = createFeatureEngineeringSettings(),
-                                               preprocessSettings = createPreprocessSettings(minFraction=0.001,
-                                                                                             normalize = T,
-                                                                                             removeRedundancy = T),
-                                               logSettings = createLogSettings(),
-                                               executeSettings = createExecuteSettings(runSplitData = T,
-                                                                                       runSampleData = T,
-                                                                                       runfeatureEngineering = T,
-                                                                                       runPreprocessData = T,
-                                                                                       runModelDevelopment = T,
-                                                                                       runCovariateSummary = F),
-                                               saveDirectory = outputFolder,
-                                               saveData = T,
-                                               loadData = NULL)
+    # List of cohorts to create
+    cohortsToCreate <- data.frame()
+    if (cohorts_study) {
+      cohortsToCreate_study <- data.frame(rbind(c("Hospital Readmission target; inpatient visit discharge as end date",1033),
+                                                c("Hospital Readmission outcome; inpatient visit",1034),
+                                                c("EoL conversations target; latest outpatient visit 2016-2021",1036),
+                                                c("EoL conversations outcome; first eol conversation",1038),
+                                                c("Mortality in COPD target; first COPD diagnosis",1035),
+                                                c("Mortality in COPD outcome; death",1037),
+                                                c("Asthma exacerbation target;", 1078),
+                                                c("Asthma exacerbation outcome;", 1054),
+                                                c("Heart failure Stroke target; type 2 diabetes mellitus with no prior stroke or heart failure",1060),
+                                                c("Heart failure Stroke outcome; first heart failure or stroke",1058)))
+      colnames(cohortsToCreate_study)<-c("cohortName","atlasId")
+      cohortsToCreate_study$atlasId<-as.numeric(cohortsToCreate_study$atlasId)
 
-  # Get reduced dataset
-  modelSettings <- PatientLevelPrediction::setUnivariateSelection(modelSettings=setLassoLogisticRegression(),
-                                                                  nVariables = nVar,
-                                                                  saveDirectory = outputFolder)
+      write.csv(cohortsToCreate_study, file.path(root, "cohortsToCreate_study.csv"), row.names = FALSE)
+      cohortsToCreate <- rbind(cohortsToCreate, cohortsToCreate_study)
+    }
 
-  plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
-                                               outcomeId = outcomeId,
-                                               modelSettings = modelSettings,
-                                               analysisId = paste0("Univariate", nVar, "_", plp),
-                                               analysisName = paste0("Univariate selection with top ", nVar, " correlated variables"),
-                                               populationSettings = populationSettings,
-                                               splitSettings = createDefaultSplitSetting(),
-                                               sampleSettings = createSampleSettings(),
-                                               featureEngineeringSettings = createFeatureEngineeringSettings(),
-                                               preprocessSettings = createPreprocessSettings(minFraction=0.001,
-                                                                                             normalize = T,
-                                                                                             removeRedundancy = T),
-                                               logSettings = createLogSettings(),
-                                               executeSettings = createExecuteSettings(runSplitData = T,
-                                                                                       runSampleData = T,
-                                                                                       runfeatureEngineering = T,
-                                                                                       runPreprocessData = T,
-                                                                                       runModelDevelopment = T,
-                                                                                       runCovariateSummary = F),
-                                               saveDirectory = outputFolder,
-                                               saveData = T,
-                                               loadData = NULL)
-}
+    if (cohorts_phenotypes) {
+      covariateIds <- c(1200:1208, 1210:1263) # SKIP cohort 1209 - cohort generation not finishing
 
-### Train models ###
-if (train) {
-  list_models <- list()
+      cohortsToCreate_phenotypes <- ROhdsiWebApi::exportCohortDefinitionSet(
+        baseUrl = baseUrl,
+        cohortIds = unique(covariateIds)
+      )
+      cohortsToCreate_phenotypes$cohortName <- gsub("[PLPCov] ", "", cohortsToCreate_phenotypes$cohortName, fixed=TRUE)
+      cohortsToCreate_phenotypes$cohortName <- gsub(" - v1", "", cohortsToCreate_phenotypes$cohortName, fixed=TRUE)
 
-  # Possible models
-  # LASSO
-  list_models[["LASSO"]] <- list(analysisId=paste0("LASSO_", plp, "_1"),
-                                 analysisName=paste0("LASSO logistic regression"),
-                                 modelSettings=PatientLevelPrediction::setLassoLogisticRegression(variance = 0.01))
+      cohortsToCreate_phenotypes <- cohortsToCreate_phenotypes[,c("cohortName","atlasId")]
+      write.csv(cohortsToCreate_phenotypes, file.path(root, "cohortsToCreate_phenotypes.csv"), row.names = FALSE)
 
-  # Gradient boosting machine
-  list_models[["XGBoost"]] <- list(analysisId=paste0("XGBoost_", plp, "_1"),
-                                   analysisName=paste0("Gradient boosting machine"),
-                                   modelSettings=PatientLevelPrediction::setGradientBoostingMachine(ntrees=c(100,300), maxDepth=c(4,8)))
+      cohortsToCreate <- rbind(cohortsToCreate, cohortsToCreate_phenotypes)
+    }
 
-  # Random forest
-  list_models[["RandomForest"]] <- list(analysisId=paste0("RandomForest_", plp, "_1"),
-                                        analysisName=paste0("Random forest"),
-                                        modelSettings=PatientLevelPrediction::setRandomForest(ntrees=list(100,300), maxDepth=list(4,8)))
+    connection <- connect(connectionDetails)
 
-  # RIPPER
-  list_models[["RIPPER"]] <- list(analysisId=paste0("RIPPER_", plp, "_1"),
-                                  analysisName=paste0("RIPPER"),
-                                  modelSettings=PatientLevelPrediction::setRIPPER(variableSelection = NULL,
-                                                                                  saveDirectory = file.path(outputFolder, paste0("RIPPER_", plp, "_1"))))
-  # Decision tree
-  list_models[["DecisionTree2"]] <- list(analysisId=paste0("DecisionTree_", plp, "_2"),
-                                         analysisName=paste0("DecisionTree_"),
-                                         modelSettings=PatientLevelPrediction::setDecisionTree(maxDepth = list(2), maxFeatures = list(nVar)))
-  list_models[["DecisionTree3"]] <- list(analysisId=paste0("DecisionTree_", plp, "_3"),
-                                         analysisName=paste0("DecisionTree_"),
-                                         modelSettings=PatientLevelPrediction::setDecisionTree(maxDepth = list(3), maxFeatures = list(nVar)))
+    # Generate target / outcome cohorts first time running study
+    for (i in 1:nrow(cohortsToCreate)) {
+      writeLines(paste("Copying cohort:", cohortsToCreate$cohortName[i]))
+      ROhdsiWebApi::insertCohortDefinitionInPackage(cohortId = cohortsToCreate$atlasId[i],
+                                                    name = cohortsToCreate$cohortName[i],
+                                                    jsonFolder = file.path(save_path, "JSON"),
+                                                    sqlFolder = file.path(save_path, "SQL"),
+                                                    baseUrl = baseurl,
+                                                    generateStats = F)
 
-  # Iterative hard thresholding
-  list_models[["IHT10"]] <- list(analysisId=paste0("IHT_", plp, "_10"),
-                                 analysisName=paste0("IHT"),
-                                 modelSettings=PatientLevelPrediction::setIterativeHardThresholding(K=10, fitBestSubset = TRUE))
-  list_models[["IHT5"]] <- list(analysisId=paste0("IHT_", plp, "_5"),
-                                analysisName=paste0("IHT"),
-                                modelSettings=PatientLevelPrediction::setIterativeHardThresholding(K=5, fitBestSubset = TRUE))
+      writeLines(paste("Creating cohort:", cohortsToCreate$cohortName[i]))
+      sql <- SqlRender::readSql(paste0("cohorts/SQL/", cohortsToCreate$cohortName[i], ".sql"))
+      sql <- SqlRender::render(sql,
+                               vocabulary_database_schema = cdmDatabaseSchema,
+                               cdm_database_schema = cdmDatabaseSchema,
+                               target_database_schema = cohortDatabaseSchema,
+                               target_cohort_table = cohortTable,
+                               target_cohort_id = cohortsToCreate$atlasId[i])
+      sql <- SqlRender::translate(sql,
+                                  targetDialect = attr(connection, "dbms"))
+      DatabaseConnector::executeSql(connection, sql)
+    }
 
-  # EXPLORE
-  explore_options <- expand.grid(StartRulelength = c(1),
-                                 EndRulelength = c(3, 4, 5),
-                                 Parallel = c("yes"),
-                                 Constraint_Accuracy = "",
-                                 Sorted = c("none"),
-                                 Maximize = c("BALANCEDACCURACY"),
-                                 stringsAsFactors = FALSE) # TODO: check what happens if no solution
-  explore_options$Option <- 3:5
-  write.csv(explore_options, file.path(outputFolder, "explore_options.csv"), row.names = FALSE)
+    # All cohorts generated
+    cohorts = FALSE
 
-  for (option in explore_options$Option) {
-    analysisId <- paste0("EXPLORE_", plp, "_", option)
-
-    modelSettings <- PatientLevelPrediction::setExplore(variableSelection = NULL,
-                                                        startRulelength = explore_options$StartRulelength[explore_options$Option == option],
-                                                        endRulelength = explore_options$EndRulelength[explore_options$Option == option],
-                                                        maximize = explore_options$Maximize[explore_options$Option == option],
-                                                        accuracy = explore_options$Constraint_Accuracy[explore_options$Option == option],
-                                                        parallel = explore_options$Parallel[explore_options$Option == option],
-                                                        aucCurve = TRUE,
-                                                        sort_by = explore_options$Sorted[explore_options$Option == option],
-                                                        saveDirectory = file.path(outputFolder, analysisId))
-
-    list_models[[paste0("EXPLORE", option)]] <- list(analysisId=analysisId,
-                                                     analysisName=paste0("EXPLORE decision rule"),
-                                                     modelSettings=modelSettings)
   }
 
-  # Run for full data for all models EXCEPT EXPLORE
-  for (m in names(list_models)[!grepl("EXPLORE", names(list_models))]) { # m = "LASSO"
+  ### Pre-process data ###
+  if (selection) {
 
-    model <- list_models[[m]]
+    # Possible covariates
+    if (covariates == "Default") { # Not for EXPLORE without pre-variable selection
+      covariateSettingList <- FeatureExtraction::createDefaultCovariateSettings()
+    } else if (covariates == "AgeSex") {
+      covariateSettingList <- FeatureExtraction::createCovariateSettings(useDemographicsGender = T, useDemographicsAgeGroup = T)
+    } else if (covariates == "Full") { # Not for EXPLORE without pre-variable selection
+      covariateSettingList <- FeatureExtraction::createCovariateSettings(useDemographicsGender = T, useDemographicsAgeGroup = T,
+                                                                         useConditionGroupEraAnyTimePrior = T, useConditionGroupEraLongTerm = T,
+                                                                         useConditionGroupEraShortTerm = T, useDrugGroupEraLongTerm = T,
+                                                                         useDrugGroupEraShortTerm = T, useDrugGroupEraOverlapping = T)
+    } else if (covariates == "Phenotypes") {
+      cohortsToCreate_phenotypes <- read.csv(file.path(root, "cohortsToCreate_phenotypes.csv")) # TODO: always available?
 
-    plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
-                                                 outcomeId = outcomeId,
-                                                 modelSettings = model$modelSettings,
-                                                 analysisId = paste0(model$analysisId, "_Full"),
-                                                 analysisName = model$analysisName,
-                                                 populationSettings = populationSettings,
-                                                 splitSettings = createDefaultSplitSetting(),
-                                                 sampleSettings = createSampleSettings(),
-                                                 featureEngineeringSettings = createFeatureEngineeringSettings(),
-                                                 preprocessSettings = createPreprocessSettings(minFraction=0.001,
-                                                                                               normalize = T,
-                                                                                               removeRedundancy = F),
-                                                 logSettings = createLogSettings(),
-                                                 executeSettings = createExecuteSettings(runSplitData = F,
-                                                                                         runSampleData = F,
-                                                                                         runfeatureEngineering = F,
-                                                                                         runPreprocessData = F,
-                                                                                         runModelDevelopment = T,
-                                                                                         runCovariateSummary = T),
-                                                 saveDirectory = outputFolder,
-                                                 saveData = F,
-                                                 loadData = file.path(outputFolder, paste0("Full_", plp), "TrainTestData"))
-  }
+      covariateSettingList <- # Phenotypes from Henrik.
+        list(
+          FeatureExtraction::createCovariateSettings(
+            useDemographicsGender = T,
+            useDemographicsAge = T) # useDemographicsAgeGroup = T
+        )
+      for (i in 1:nrow(cohortsToCreate_phenotypes)){
+        covariateSettingList <- append(covariateSettingList,
+                                       list(PatientLevelPrediction::createCohortCovariateSettings(
+                                         cohortName = cohortsToCreate_phenotypes$cohortName[i],
+                                         settingId = 1,
+                                         cohortDatabaseSchema = cohortDatabaseSchema,
+                                         cohortTable = cohortTable,
+                                         cohortId = cohortsToCreate_phenotypes$atlasId[i],
+                                         startDay = -365,
+                                         endDay = 0,
+                                         analysisId = cohortsToCreate_phenotypes$atlasId[i])))
+      }
+    }
 
-  # Run for reduced data for all models
-  for (m in names(list_models)) {
-
-    model <- list_models[[m]]
-
-    plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
-                                                 outcomeId = outcomeId,
-                                                 modelSettings = model$modelSettings,
-                                                 analysisId = model$analysisId,
-                                                 analysisName = model$analysisName,
-                                                 populationSettings = populationSettings,
-                                                 splitSettings = createDefaultSplitSetting(),
-                                                 sampleSettings = createSampleSettings(),
-                                                 featureEngineeringSettings = createFeatureEngineeringSettings(),
-                                                 preprocessSettings = createPreprocessSettings(minFraction=0.001,
-                                                                                               normalize = T,
-                                                                                               removeRedundancy = F),
-                                                 logSettings = createLogSettings(),
-                                                 executeSettings = createExecuteSettings(runSplitData = F,
-                                                                                         runSampleData = F,
-                                                                                         runfeatureEngineering = F,
-                                                                                         runPreprocessData = F,
-                                                                                         runModelDevelopment = T,
-                                                                                         runCovariateSummary = T),
-                                                 saveDirectory = outputFolder,
-                                                 saveData = F,
-                                                 loadData = file.path(outputFolder, paste0("Univariate", nVar, "_", plp), "TrainTestData")
+    # Selected covariates
+    plpData <- PatientLevelPrediction::getPlpData(
+      databaseDetails = databaseDetails,
+      restrictPlpDataSettings = createRestrictPlpDataSettings(),
+      covariateSettings = covariateSettingList
     )
+
+    # Get dataset (no selection)
+    plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
+                                                 outcomeId = outcomeId,
+                                                 modelSettings = PatientLevelPrediction::setLassoLogisticRegression(variance=0.01),
+                                                 analysisId = paste0("Data_", plp, "_", covariates),
+                                                 analysisName = paste0("No selection"),
+                                                 populationSettings = populationSettings,
+                                                 splitSettings = createDefaultSplitSetting(),
+                                                 sampleSettings = createSampleSettings(),
+                                                 featureEngineeringSettings = createFeatureEngineeringSettings(),
+                                                 preprocessSettings = createPreprocessSettings(minFraction=0.001,
+                                                                                               normalize = T,
+                                                                                               removeRedundancy = T),
+                                                 logSettings = createLogSettings(),
+                                                 executeSettings = createExecuteSettings(runSplitData = T,
+                                                                                         runSampleData = T,
+                                                                                         runfeatureEngineering = T,
+                                                                                         runPreprocessData = T,
+                                                                                         runModelDevelopment = F,
+                                                                                         runCovariateSummary = F),
+                                                 saveDirectory = outputFolder,
+                                                 saveData = T,
+                                                 loadData = NULL)
+
+    # Get reduced dataset (apply pre-variable selection)
+    # modelSettings <- PatientLevelPrediction::setUnivariateSelection(modelSettings=setLassoLogisticRegression(),
+    #                                                                 nVariables = nVar,
+    #                                                                 saveDirectory = outputFolder)
+    #
+    # plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
+    #                                              outcomeId = outcomeId,
+    #                                              modelSettings = modelSettings,
+    #                                              analysisId = paste0("Data_Univariate", nVar, "_", plp),
+    #                                              analysisName = paste0("Univariate selection with top ", nVar, " correlated variables"),
+    #                                              populationSettings = populationSettings,
+    #                                              splitSettings = createDefaultSplitSetting(),
+    #                                              sampleSettings = createSampleSettings(),
+    #                                              featureEngineeringSettings = createFeatureEngineeringSettings(),
+    #                                              preprocessSettings = createPreprocessSettings(minFraction=0.001,
+    #                                                                                            normalize = T,
+    #                                                                                            removeRedundancy = T),
+    #                                              logSettings = createLogSettings(),
+    #                                              executeSettings = createExecuteSettings(runSplitData = T,
+    #                                                                                      runSampleData = T,
+    #                                                                                      runfeatureEngineering = T,
+    #                                                                                      runPreprocessData = T,
+    #                                                                                      runModelDevelopment = T,
+    #                                                                                      runCovariateSummary = F),
+    #                                              saveDirectory = outputFolder,
+    #                                              saveData = T,
+    #                                              loadData = NULL)
   }
-}
 
-### Evaluate ###
-if (evaluate) {
-  source(file.path(root, "code/helper.R"))
-  source(file.path(root, "code/transform-data.R"))
 
-  outputList <- list.dirs(path = paste0(outputFolder, "/"), full.names = F, recursive = F)
-  outputList <- outputList[!grepl("Univariate|Full_", outputList)] # Remove variable selection results
+  ### Train models ###
+  if (train) {
 
-  summary_data <- data.frame()
-  methods_output <- data.frame()
+    # Possible models
+    list_models <- list()
 
-  datasets <- unique(sapply(outputList, function(l) unlist(strsplit(l, split = "_"))[[2]]))
+    # LASSO
+    list_models[["LASSO"]] <- list(analysisId=paste0("LASSO_", plp, "_1"),
+                                   analysisName=paste0("LASSO logistic regression"),
+                                   modelSettings=PatientLevelPrediction::setLassoLogisticRegression(variance = 0.01))
 
-  for (plp in datasets) {
-    # Select results for current dataset
-    outputList_d <- outputList[grepl(plp, outputList)]
+    # Gradient boosting machine
+    list_models[["XGBoost"]] <- list(analysisId=paste0("XGBoost_", plp, "_1"),
+                                     analysisName=paste0("Gradient boosting machine"),
+                                     modelSettings=PatientLevelPrediction::setGradientBoostingMachine(ntrees=c(100,300), maxDepth=c(4,8)))
 
-    # Load data
-    path <- file.path(outputFolder, paste0("Univariate", nVar, "_", plp), "TrainTestData")
-    data <- loadTrainTestData(path)
+    # Random forest
+    list_models[["RandomForest"]] <- list(analysisId=paste0("RandomForest_", plp, "_1"),
+                                          analysisName=paste0("Random forest"),
+                                          modelSettings=PatientLevelPrediction::setRandomForest(ntrees=list(100,300), maxDepth=list(4,8)))
 
-    for (selection in c(TRUE, FALSE)) {
+    # RIPPER
+    list_models[["RIPPER"]] <- list(analysisId=paste0("RIPPER_", plp, "_1"),
+                                    analysisName=paste0("RIPPER"),
+                                    modelSettings=PatientLevelPrediction::setRIPPER(variableSelection = NULL,
+                                                                                    saveDirectory = file.path(outputFolder, paste0("RIPPER_", plp, "_1"))))
+    # Decision tree
+    list_models[["DecisionTree2"]] <- list(analysisId=paste0("DecisionTree_", plp, "_2"),
+                                           analysisName=paste0("DecisionTree_"),
+                                           modelSettings=PatientLevelPrediction::setDecisionTree(maxDepth = list(2))) # , maxFeatures = list(nVar)
+    list_models[["DecisionTree3"]] <- list(analysisId=paste0("DecisionTree_", plp, "_3"),
+                                           analysisName=paste0("DecisionTree_"),
+                                           modelSettings=PatientLevelPrediction::setDecisionTree(maxDepth = list(3))) # , maxFeatures = list(nVar)
 
-      if (selection) { # Selection of 50 variables
-        sel_name <- ""
-        outputList_d_s <- outputList_d[!grepl("_Full", outputList_d)]
+    # Iterative hard thresholding
+    list_models[["IHT10"]] <- list(analysisId=paste0("IHT_", plp, "_10"),
+                                   analysisName=paste0("IHT"),
+                                   modelSettings=PatientLevelPrediction::setIterativeHardThresholding(K=10, fitBestSubset = TRUE))
+    list_models[["IHT5"]] <- list(analysisId=paste0("IHT_", plp, "_5"),
+                                  analysisName=paste0("IHT"),
+                                  modelSettings=PatientLevelPrediction::setIterativeHardThresholding(K=5, fitBestSubset = TRUE))
 
-        # Summarize data
-        result <- PatientLevelPrediction::loadPlpResult(file.path(outputFolder, paste0("LASSO_", plp, "_1"), "plpResult"))
-      } else { # All candidate covariates
-        sel_name <- "_Full"
-        outputList_d_s <- outputList_d[grepl("_Full", outputList_d)]
+    # EXPLORE
+    explore_options <- expand.grid(StartRulelength = c(1),
+                                   EndRulelength = c(3, 4, 5),
+                                   Parallel = c(TRUE),
+                                   Sorted = c("none"),
+                                   Maximize = c("BALANCEDACCURACY"),
+                                   stringsAsFactors = FALSE) # TODO: check what happens if no solution
+    explore_options$Option <- 3:5
+    write.csv(explore_options, file.path(outputFolder, "explore_options.csv"), row.names = FALSE)
 
-        # Summarize data
-        result <- PatientLevelPrediction::loadPlpResult(file.path(outputFolder, paste0("LASSO_", plp, "_1_Full"), "plpResult"))
-        summary_data <- summarizeDataPLP(summary_data, result, plp)
-      }
+    for (option in explore_options$Option) {
+      analysisId <- paste0("EXPLORE_", plp, "_", option)
 
-      # Save objects
-      features <- result$model$model$coefficients$covariateIds
-      features <- features[features!='(Intercept)']
-      models <- setNames(data.table(matrix(0, nrow = 0, ncol = length(features)+4)), c("method", "iteration", "option", features, "model size")) # NO INTERCEPT
+      modelSettings <- PatientLevelPrediction::setExplore(variableSelection = NULL,
+                                                          startRulelength = explore_options$StartRulelength[explore_options$Option == option],
+                                                          endRulelength = explore_options$EndRulelength[explore_options$Option == option],
+                                                          maximize = explore_options$Maximize[explore_options$Option == option],
+                                                          parallel = explore_options$Parallel[explore_options$Option == option],
+                                                          modelsCurve = TRUE,
+                                                          sort_by = explore_options$Sorted[explore_options$Option == option],
+                                                          saveDirectory = file.path(outputFolder, paste0(analysisId, "_", covariates)))
 
-      for (o in outputList_d_s) { #  o = outputList_d_s[1]
-        print(o)
+      list_models[[paste0("EXPLORE", option)]] <- list(analysisId=analysisId,
+                                                       analysisName=paste0("EXPLORE decision rule"),
+                                                       modelSettings=modelSettings)
 
-        method <- unlist(strsplit(o, split = "_"))[1]
-        i <- unlist(strsplit(o, split = "_"))[3]
+    }
 
-        result <- PatientLevelPrediction::loadPlpResult(file.path(outputFolder, o, "plpResult"))
+    # GOSDT
+    list_models[["GOSDT"]] <- list(analysisId=paste0("GOSDT_", plp, "_1"),
+                                   analysisName=paste0("GOSDT"),
+                                   modelSettings=PatientLevelPrediction::setGOSDT())
 
-        # Save computation time method
-        time <- result$model$trainDetails$trainingTime
+    # Rashomon Ratio
+    for (option in explore_options$Option) {
+      analysisId <- paste0("EXPLORE_", plp, "_", option, "_RR")
 
-        # Save model
-        if (method == "LASSO" || method == "IHT") {
-          varImp <- result$model$model$coefficients
-          vars <- varImp$betas[varImp$covariateIds!='(Intercept)']
-          names(vars) <- as.double(varImp$covariateIds[varImp$covariateIds!='(Intercept)'])
-          size <- sum(sapply(vars, function(v) ifelse(v != 0, 1, 0)))
-        } else if (method == "RandomForest" || method == "DecisionTree") {
-          varImp <- result$model$covariateImportance
-          vars <- varImp$covariateValue
-          names(vars) <- varImp$covariateId
-          size <- sum(sapply(vars, function(v) ifelse(v != 0, 1, 0)))
-        } else if (method == "EXPLORE" || method == "RIPPER") {
-          varImp <- result$model$covariateImportance
-          vars <- varImp$covariateValue
-          names(vars) <- varImp$covariateId
-          size <- sum(varImp$covariateValue)
-        } else if (method == "XGBoost") {
-          varImp <- result$model$covariateImportance
-          varImp <- varImp %>% group_by(covariateId) %>% summarise(included=max(included)) # Variables can occur twice in computed var importance
-          vars <- varImp$included
-          names(vars) <- varImp$covariateId
-          size <- sum(varImp$included)
-        } else {
-          stop('Model not included')
-        }
+      modelSettings <- PatientLevelPrediction::setExplore(variableSelection = NULL,
+                                                          startRulelength = explore_options$StartRulelength[explore_options$Option == option],
+                                                          endRulelength = explore_options$EndRulelength[explore_options$Option == option],
+                                                          maximize = explore_options$Maximize[explore_options$Option == option],
+                                                          balancedAccuracy = 0.7, # TODO: vary based on plp / option
+                                                          parallel = explore_options$Parallel[explore_options$Option == option],
+                                                          modelsCurve = FALSE,
+                                                          sort_by = explore_options$Sorted[explore_options$Option == option],
+                                                          saveDirectory = file.path(outputFolder, analysisId))
 
-        model <- c(method=method, iteration=1, option=i, as.list(vars), `model size`=size)
-        models <- rbind(models, model)
+      list_models[[paste0("EXPLORE", option, "_RR")]] <- list(analysisId=analysisId,
+                                                              analysisName=paste0("EXPLORE decision rule"),
+                                                              modelSettings=modelSettings)
+    }
 
-        # Evaluate predictions
-        real_train <- result$prediction$outcomeCount[result$prediction$evaluationType == "Train"]
-        predictions_train <- result$prediction$value[result$prediction$evaluationType == "Train"]
+    # Run for all models
+    for (m in names(list_models)) {
 
-        real_test <- result$prediction$outcomeCount[result$prediction$evaluationType == "Test"]
-        predictions_test <- result$prediction$value[result$prediction$evaluationType == "Test"]
+      model <- list_models[[m]]
 
-        if (method != "EXPLORE") { # OR ALSO FOR EXPLORE??
-          model_description <- paste0(size, " covariates")
-          eval_train_prob <- evaluateModel(predictions_train, real_train, model=model_description, class=F)
-          eval_train_class <- evaluateModel(prob_to_class(predictions_train, real_train), model=model_description, real_train)
-
-          eval_test_prob <- evaluateModel(predictions_test, real_test, model=model_description, class=F)
-          eval_test_class <- evaluateModel(prob_to_class(predictions_test, real_test), model=model_description, real_test)
-        } else {
-          model_description <- result$model$model$fit
-          eval_train_prob <- exploreCurve(models_AUCcurve = result$model$model$models_AUCcurve, plpModel=result$model, data=data$Train)
-          eval_train_class <- evaluateModel(predictions_train, real_train, model=model_description)
-
-          eval_test_prob <-  exploreCurve(models_AUCcurve = result$model$model$models_AUCcurve, plpModel=result$model, data=data$Test)
-          eval_test_class <- evaluateModel(predictions_test, real_test, model=model_description)
-        }
-
-        eval <- append(append(append(eval_test_class, eval_test_prob), eval_train_class), eval_train_prob)
-        names(eval) <- c(paste0(names(eval_test_class), "_Test_Class"), paste0(names(eval_test_prob), "_Test_Prob"), paste0(names(eval_train_class), "_Train_Class"), paste0(names(eval_train_prob), "_Train_Prob"))
-        methods_output <- rbind(methods_output, c(append(list(Time = time, Data = plp, Selection=as.character(selection), Method = method, Iteration = 1, Option = i, Model = model_description), eval)))
-      }
-
-      write.csv(models, file.path(outputFolder, paste0("models_", plp, sel_name, ".csv")), row.names = FALSE)
+      plpResults <- PatientLevelPrediction::runPlp(plpData = plpData,
+                                                   outcomeId = outcomeId,
+                                                   modelSettings = model$modelSettings,
+                                                   analysisId = paste0(model$analysisId, "_", covariates), # Add name of selected covariates
+                                                   analysisName = model$analysisName,
+                                                   populationSettings = populationSettings,
+                                                   splitSettings = createDefaultSplitSetting(),
+                                                   sampleSettings = createSampleSettings(),
+                                                   featureEngineeringSettings = createFeatureEngineeringSettings(),
+                                                   preprocessSettings = createPreprocessSettings(minFraction=0.001,
+                                                                                                 normalize = T,
+                                                                                                 removeRedundancy = F),
+                                                   logSettings = createLogSettings(),
+                                                   executeSettings = createExecuteSettings(runSplitData = F, # T
+                                                                                           runSampleData = F,
+                                                                                           runfeatureEngineering = F,
+                                                                                           runPreprocessData = F, # T
+                                                                                           runModelDevelopment = T,
+                                                                                           runCovariateSummary = T),
+                                                   saveDirectory = outputFolder)
     }
   }
-
-  write.csv(summary_data, file.path(outputFolder, paste0("summary_data.csv")), row.names = FALSE)
-  write.csv(methods_output, file.path(outputFolder, paste0("output_methods.csv")), row.names = FALSE)
-}
-
-### Launch shiny ###
-if (shiny) {
-  shiny::runApp('shiny')
 }
 
 

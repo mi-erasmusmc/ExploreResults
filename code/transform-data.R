@@ -27,10 +27,10 @@ runCheckData <- function(data, d) {
 
 }
 
-summarizeDataPLP <- function(summary_data, result, plp) {
+summarizePLP <- function(plp, summary_tasks, data) {
 
-  real_train <- result$prediction$outcomeCount[result$prediction$evaluationType == "Train"]
-  real_test <- result$prediction$outcomeCount[result$prediction$evaluationType == "Test"]
+  real_train <- data$Train$labels$outcomeCount
+  real_test <- data$Test$labels$outcomeCount
 
   # Number of outcomes
   outcomes_train <- sum(real_train)
@@ -44,31 +44,18 @@ summarizeDataPLP <- function(summary_data, result, plp) {
   rate_train <- outcomes_train * 100.0 / observations_train
   rate_test <- outcomes_train * 100.0 / observations_train
 
-  # Number of features
-  num_features <- nrow(result$model$covariateImportance)
+  # Number of features (occuring in training sample)
+  num_features <- length(unique(as.data.frame(data$Train$covariateData$covariates)$covariateId))
 
-  # Number of different values per feature
-  max_val_features <- NA # max(sapply(data, function(c) length(unique(c))))
-  min_val_features <- NA # min(sapply(data, function(c) length(unique(c))))
-
-  # Max range across features
-  min_val <- NA
-  max_val <- NA
-
-  summary_data <- rbind(summary_data, c(list("Data" = plp,
+  summary_tasks <- rbind(summary_tasks, c(list("Data" = plp,
                                              "Outcomes_train" = outcomes_train,
                                              "Observations_train" = observations_train,
                                              "Outcome_rate_train" = rate_train,
                                              "Outcomes_test" = outcomes_test,
                                              "Observations_test" = observations_test,
                                              "Outcome_rate_test" = rate_test,
-                                             "Number_of_features" = num_features,
-                                             "Max_different_values" = max_val_features,
-                                             "Min_different_values" = min_val_features,
-                                             "Min_val" = min_val,
-                                             "Max_val" =  max_val,
-                                             "Outcomes_resampling" = NA,
-                                             "Outcome_rate_resampling" = NA)))
-  return(summary_data)
+                                             "Number_of_features" = num_features)))
+  return(summary_tasks)
 }
+
 
