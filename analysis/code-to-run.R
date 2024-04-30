@@ -13,8 +13,7 @@ library(dplyr)
 library(caret)
 library(pracma)
 
-# reticulate::use_condaenv("reticulate3.8") # IPCI server
-# reticulate::use_condaenv("Explore") # Local laptop
+# reticulate::use_condaenv("todo")
 
 plp <- "Test"
 plptasks <- c("HospitalReadmission", "COPDMortality", "EoLConversation", "HeartfailureStroke", "AsthmaExacerbation")
@@ -69,11 +68,11 @@ for (plp in plptasks) {
 
   } else {
     # Details for connecting to the server:
-    dbms <- 'postgresql'
-    user <- 'amarkus'
-    pw <- 'amarkus'
-    server <- 'Res-Srv-Lin-02/CDM-O-20230321'
-    port <- 5432
+    dbms <- 'todo'
+    user <- 'todo'
+    pw <- 'todo'
+    server <- 'todo'
+    port <- 'todo'
 
     connectionDetails <- DatabaseConnector::createConnectionDetails(dbms = dbms,
                                                                     server = server,
@@ -81,7 +80,7 @@ for (plp in plptasks) {
                                                                     password = pw,
                                                                     port = port)
     cohortTable <- 'cohorts_explore'
-    baseUrl <- 'http://res-srv-lin-02:8080/WebAPI'
+    baseUrl <- 'todo'
 
     if (plp == "HospitalReadmission") {
       # Select cohorts
@@ -170,7 +169,7 @@ for (plp in plptasks) {
     }
 
     cdmDatabaseSchema = 'cdm'
-    cohortDatabaseSchema = 'amarkus'
+    cohortDatabaseSchema = 'todo'
 
     databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetails = connectionDetails,
                                                                      cdmDatabaseSchema = cdmDatabaseSchema,
@@ -328,8 +327,7 @@ for (plp in plptasks) {
                                                                                          runModelDevelopment = F,
                                                                                          runCovariateSummary = F),
                                                  saveDirectory = outputFolder,
-                                                 saveData = T,
-                                                 loadData = NULL)
+                                                 saveData = T)
 
     # Get reduced dataset (apply pre-variable selection)
     # modelSettings <- PatientLevelPrediction::setUnivariateSelection(modelSettings=setLassoLogisticRegression(),
@@ -479,7 +477,9 @@ for (plp in plptasks) {
                                                                                            runPreprocessData = F, # T
                                                                                            runModelDevelopment = T,
                                                                                            runCovariateSummary = T),
-                                                   saveDirectory = outputFolder)
+                                                   saveDirectory = outputFolder,
+                                                   saveData = F,
+                                                   loadData = file.path(outputFolder, paste0("Data_", plp, "_", covariates), "TrainTestData"))
     }
   }
 }
